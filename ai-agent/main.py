@@ -824,6 +824,8 @@ async def test_webhook_endpoint(request: Request):
     # Llamar al webhook normal
     return await webhook(Request(scope={"type": "http", "method": "POST", "path": "/webhook"}, _receive=lambda: {"type": "http.request", "body": json.dumps(test_data).encode()}))
 
+# https://ai-agents-v0no.onrender.com/webhook 
+# Endpoint para utilizar webhook de render y conectarlo a evolution api
 @app.post("/webhook")
 async def webhook(req: Request):
     """Webhook para recibir mensajes"""
