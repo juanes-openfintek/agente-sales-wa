@@ -19,6 +19,8 @@ from app.utils.messages import (
     format_inactivity_reminder,
     format_payment_methods,
     format_order_confirmation,
+    format_new_order_prompt,
+    format_name_with_order_intent,
 )
 
 __all__ = [
@@ -37,4 +39,6 @@ __all__ = [
     "format_inactivity_reminder",
     "format_payment_methods",
     "format_order_confirmation",
+    "format_new_order_prompt",
+    "format_name_with_order_intent",
 ]

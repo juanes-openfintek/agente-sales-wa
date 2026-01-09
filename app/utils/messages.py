@@ -165,7 +165,7 @@ def format_welcome_message() -> str:
     Mensaje de bienvenida inicial.
     """
     return (
-        "🥩 ¡Hola! Bienvenido a nuestro distribuidor de *carnes crudas* de alta calidad\n\n"
+        "🥩 ¡Hola! Bienvenido a nuestro distribuidor de *carnes finas* de alta calidad\n\n"
         "Para empezar, ¿cuál es tu nombre?\n\n"
         "📝 *Ejemplo:* Juan"
     )
@@ -176,7 +176,7 @@ def format_name_captured(name: str) -> str:
     Mensaje después de capturar el nombre.
     """
     return (
-        f"¡Perfecto, {name}! Somos distribuidores de carnes crudas de alta calidad. 🥩\n\n"
+        f"¡Perfecto, {name}! Somos distribuidores de carnes finas de alta calidad. 🥩\n\n"
         "Tenemos productos individuales por kilo y combos especiales. "
         "¿Qué te gustaría ver?\n\n"
         "Puedo mostrarte nuestro catálogo completo o recomendarte algo según tus necesidades."
@@ -267,3 +267,25 @@ def format_order_already_completed() -> str:
     Mensaje cuando el pedido ya está completado.
     """
     return "Tu pedido ya está confirmado. Si tienes alguna pregunta adicional, por favor escríbenos."
+
+
+def format_new_order_prompt() -> str:
+    """
+    Mensaje cuando el cliente quiere hacer un nuevo pedido después de completar uno.
+    """
+    return (
+        "¡Claro! Me encanta que quieras hacer otro pedido. 🥩\n\n"
+        "Vamos a empezar de nuevo. ¿Qué te gustaría ordenar esta vez?\n\n"
+        "Puedo mostrarte nuestro catálogo o recomendarte algo según tus necesidades."
+    )
+
+
+def format_name_with_order_intent() -> str:
+    """
+    Mensaje cuando detectamos que el usuario quiere pedir pero no dio su nombre.
+    """
+    return (
+        "¡Perfecto! Veo que quieres hacer un pedido. 🥩\n\n"
+        "Antes de continuar, ¿me puedes decir tu nombre?\n\n"
+        "📝 *Ejemplo:* Juan"
+    )

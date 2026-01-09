@@ -71,6 +71,43 @@ NAME_PHRASES_TO_REMOVE: Final[tuple[str, ...]] = (
     "hola",
 )
 
+# Palabras/frases que indican intención de pedido (NO es un nombre)
+ORDER_INTENT_KEYWORDS: Final[tuple[str, ...]] = (
+    "quiero",
+    "quisiera",
+    "me gustaria",
+    "me gustaría",
+    "necesito",
+    "pedido",
+    "pedir",
+    "ordenar",
+    "orden",
+    "comprar",
+    "compra",
+    "catalogo",
+    "catálogo",
+    "menu",
+    "menú",
+    "productos",
+    "combos",
+    "combo",
+    "carne",
+    "carnes",
+    "kilo",
+    "kilos",
+    "kg",
+    "precio",
+    "precios",
+    "cuanto",
+    "cuánto",
+    "cuesta",
+    "vale",
+    "tienen",
+    "hay",
+    "venden",
+    "ofrecen",
+)
+
 # TLDs comunes mal escritos (typos)
 COMMON_TLD_TYPOS: Final[dict[str, str]] = {
     "con": "com",
@@ -377,5 +414,62 @@ def looks_like_address(token: str) -> bool:
     # Verificar patrón numérico típico de direcciones
     if ADDRESS_NUMBER_PATTERN.search(token):
         return True
+
+    return False
+
+
+def is_order_intent(text: str) -> bool:
+    """
+    Detecta si el texto es una intención de pedido en lugar de un nombre.
+
+    Returns:
+        bool: True si parece una intención de pedido
+    """
+    if not text:
+        return False
+
+    lower = text.lower().strip()
+
+    # Verificar si contiene palabras de intención de pedido
+    for keyword in ORDER_INTENT_KEYWORDS:
+        if keyword in lower:
+            return True
+
+    return False
+
+
+def is_new_order_request(text: str) -> bool:
+    """
+    Detecta si el texto es una solicitud de nuevo pedido.
+
+    Returns:
+        bool: True si quiere hacer un nuevo pedido
+    """
+    if not text:
+        return False
+
+    lower = text.lower().strip()
+
+    new_order_phrases = [
+        "nuevo pedido",
+        "otro pedido",
+        "quiero pedir",
+        "quiero comprar",
+        "quiero ordenar",
+        "comprar mas",
+        "comprar más",
+        "pedir mas",
+        "pedir más",
+        "hacer otro",
+        "hacer un pedido",
+        "volver a pedir",
+        "volver a comprar",
+        "vendeme",
+        "véndeme",
+    ]
+
+    for phrase in new_order_phrases:
+        if phrase in lower:
+            return True
 
     return False

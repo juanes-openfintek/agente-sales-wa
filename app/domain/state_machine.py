@@ -37,6 +37,8 @@ from app.utils.validation import (
     extract_cedula_from_text,
     extract_city_from_text,
     looks_like_address,
+    is_order_intent,
+    is_new_order_request,
 )
 from app.utils.messages import (
     format_missing_fields_prompt,
@@ -56,6 +58,8 @@ from app.utils.messages import (
     format_ask_confirmation_again,
     format_cedula_invalid,
     format_order_already_completed,
+    format_new_order_prompt,
+    format_name_with_order_intent,
 )
 
 
@@ -321,22 +325,27 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
             reply_text = format_whatsapp_message(format_welcome_message())
             update_lead_func(phone, status=ConversationState.COLLECTING_INFO.value)
         else:
-            # Segundo mensaje - extraer nombre con validación mejorada
-            is_valid, result = validate_name(text)
-
-            if is_valid:
-                name = result  # result contiene el nombre limpio
-                contact_phone = lead_info.get("contact_phone") or phone
-                update_lead_func(
-                    phone,
-                    name=name,
-                    contact_phone=contact_phone,
-                    status=ConversationState.BROWSING.value
-                )
-                reply_text = format_whatsapp_message(format_name_captured(name))
+            # Verificar si es una intención de pedido en lugar de nombre
+            if is_order_intent(text):
+                # El usuario quiere pedir pero no dio su nombre
+                reply_text = format_whatsapp_message(format_name_with_order_intent())
             else:
-                # Validación falló - pedir nombre de nuevo con feedback
-                reply_text = format_whatsapp_message(format_validation_error("nombre", result))
+                # Intentar extraer nombre con validación mejorada
+                is_valid, result = validate_name(text)
+
+                if is_valid:
+                    name = result  # result contiene el nombre limpio
+                    contact_phone = lead_info.get("contact_phone") or phone
+                    update_lead_func(
+                        phone,
+                        name=name,
+                        contact_phone=contact_phone,
+                        status=ConversationState.BROWSING.value
+                    )
+                    reply_text = format_whatsapp_message(format_name_captured(name))
+                else:
+                    # Validación falló - pedir nombre de nuevo con feedback
+                    reply_text = format_whatsapp_message(format_validation_error("nombre", result))
 
     # ============================================================
     # ESTADO: BROWSING (Navegando catálogo)
@@ -514,7 +523,27 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
     # ESTADO: PAYMENT_COMPLETED (Pedido completado)
     # ============================================================
     elif current_state == ConversationState.PAYMENT_COMPLETED.value:
-        reply_text = format_whatsapp_message(format_order_already_completed())
+        # Verificar si quiere hacer un nuevo pedido
+        if is_new_order_request(text):
+            # Reiniciar para nuevo pedido pero mantener nombre y datos de contacto
+            name = lead_info.get("name")
+            contact_phone = lead_info.get("contact_phone")
+
+            # Limpiar datos del pedido anterior pero mantener info del cliente
+            update_lead_func(
+                phone,
+                status=ConversationState.BROWSING.value,
+                cedula=None,
+                address=None,
+                city=None,
+                email=None,
+                delivery_time=None,
+                payment_method=None,
+            )
+
+            reply_text = format_whatsapp_message(format_new_order_prompt())
+        else:
+            reply_text = format_whatsapp_message(format_order_already_completed())
 
     # ============================================================
     # FALLBACK: Respuesta de IA

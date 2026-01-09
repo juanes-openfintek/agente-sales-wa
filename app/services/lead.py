@@ -305,6 +305,7 @@ def get_all_active_conversations() -> list[dict[str, Any]]:
     # Luego agregar de Supabase
     if supabase:
         try:
+            # Intentar con las columnas nuevas primero
             response = (
                 supabase.table("leads")
                 .select("phone, name, status, last_customer_message_at, reminder_sent_at")
@@ -315,8 +316,28 @@ def get_all_active_conversations() -> list[dict[str, Any]]:
                 # No duplicar si ya está en test_conversations
                 if lead["phone"] not in test_conversations:
                     active.append(lead)
-        except Exception as e:  # pragma: no cover
-            print(f"[ERROR] Error obteniendo conversaciones activas: {e}")
+        except Exception as e:
+            # Si las columnas no existen, usar updated_at como fallback
+            print(f"[WARNING] Columnas de inactividad no existen, usando updated_at: {e}")
+            try:
+                response = (
+                    supabase.table("leads")
+                    .select("phone, name, status, updated_at")
+                    .neq("status", ConversationState.PAYMENT_COMPLETED.value)
+                    .execute()
+                )
+                for lead in response.data:
+                    if lead["phone"] not in test_conversations:
+                        # Usar updated_at como fallback para last_customer_message_at
+                        active.append({
+                            "phone": lead["phone"],
+                            "name": lead.get("name"),
+                            "status": lead.get("status"),
+                            "last_customer_message_at": lead.get("updated_at"),
+                            "reminder_sent_at": None,
+                        })
+            except Exception as e2:
+                print(f"[ERROR] Error obteniendo conversaciones activas: {e2}")
 
     return active
 
