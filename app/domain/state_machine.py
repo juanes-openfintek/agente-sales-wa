@@ -214,6 +214,36 @@ def save_next_order_preference(phone: str, preference: str, save_event_func) -> 
 
 
 # ============================================================
+# CACHE PARA DEDUPLICACIÓN DE MENSAJES
+# ============================================================
+# Guarda message_ids procesados recientemente para evitar duplicados
+_processed_messages: dict[str, float] = {}
+_MESSAGE_CACHE_TTL_SECONDS = 60  # Tiempo de vida del cache
+
+
+def _cleanup_message_cache() -> None:
+    """Limpia mensajes antiguos del cache."""
+    import time
+    now = time.time()
+    expired = [k for k, v in _processed_messages.items() if now - v > _MESSAGE_CACHE_TTL_SECONDS]
+    for k in expired:
+        del _processed_messages[k]
+
+
+def _is_duplicate_message(message_id: str) -> bool:
+    """Verifica si un mensaje ya fue procesado."""
+    import time
+    _cleanup_message_cache()
+
+    if message_id in _processed_messages:
+        print(f"[DUPLICATE] Mensaje {message_id} ya procesado, ignorando...")
+        return True
+
+    _processed_messages[message_id] = time.time()
+    return False
+
+
+# ============================================================
 # HANDLER PRINCIPAL
 # ============================================================
 
@@ -237,6 +267,11 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
     if from_me:
         return {"ok": True, "ignored": True}
 
+    # Verificar mensaje duplicado usando messageId
+    message_id = key_obj.get("id", "")
+    if message_id and _is_duplicate_message(message_id):
+        return {"ok": True, "ignored": True, "reason": "duplicate"}
+
     # Extraer teléfono
     remote_jid = key_obj.get("remoteJid", "")
     phone = (
@@ -258,7 +293,7 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
     if not phone or (not text and not has_image):
         return {"ok": True, "ignored": True}
 
-    print(f"📩 [MSG] De: {phone} | Texto: {text[:30]}...")
+    print(f"📩 [MSG] De: {phone} | Texto: {text[:30]}... | ID: {message_id}")
 
     # Determinar modo de prueba
     is_demo = raw.get("demo", False) or "demo" in phone.lower() or phone == "user"
@@ -615,4 +650,12 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
         if status < 200 or status >= 300:
             print(f"[ERROR SEND] ({status}) Falló envío a {phone}: {response}")
 
-    return {"reply": reply_text, "image": image_url, "action": action}
+    # Obtener estado actualizado para la respuesta
+    if is_test:
+        final_lead_info = get_test_lead_info(phone)
+    else:
+        final_lead_info = get_lead_info(phone)
+    
+    new_status = final_lead_info.get("status", current_state)
+
+    return {"reply": reply_text, "image": image_url, "action": action, "new_status": new_status}
