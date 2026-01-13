@@ -81,7 +81,9 @@ PAYMENT_METHODS: dict[str, str] = {
 # ============================================================
 # CONFIGURACIÓN DE INACTIVIDAD
 # ============================================================
+# Tiempo de espera antes de enviar recordatorio (15 minutos es más natural para ventas)
 INACTIVITY_TIMEOUT_MINUTES: Final[int] = 10
+# Intervalo de verificación del scheduler (cada 60 segundos)
 SCHEDULER_CHECK_INTERVAL_SECONDS: Final[int] = 60
 
 

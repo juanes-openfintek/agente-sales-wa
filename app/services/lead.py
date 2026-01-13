@@ -45,9 +45,14 @@ def get_test_lead_info(phone: str) -> dict[str, Any]:
             "status": ConversationState.COLLECTING_INFO.value,
             "payment_method": None,
             "events": [],
-            # Nuevos campos para tracking de inactividad
+            # Campos del pedido actual
+            "order_items": None,
+            "order_total": None,
+            # Campos para tracking de inactividad
             "last_customer_message_at": None,
             "reminder_sent_at": None,
+            # Campo para preferencia de aviso
+            "notify_preference": None,
         }
 
     return test_conversations[phone].copy()
@@ -136,9 +141,14 @@ def _get_default_lead_info() -> dict[str, Any]:
         "delivery_time": None,
         "status": ConversationState.COLLECTING_INFO.value,
         "payment_method": None,
+        # Campos del pedido actual
+        "order_items": None,  # JSON string con items del pedido
+        "order_total": None,  # Total del pedido
         # Campos de tracking de inactividad
         "last_customer_message_at": None,
         "reminder_sent_at": None,
+        # Campo para preferencia de aviso
+        "notify_preference": None,
     }
 
 
@@ -162,9 +172,14 @@ def get_lead_info(phone: str) -> dict[str, Any]:
                 "delivery_time": lead.get("delivery_time"),
                 "status": lead.get("status", ConversationState.COLLECTING_INFO.value),
                 "payment_method": lead.get("payment_method"),
+                # Campos del pedido actual
+                "order_items": lead.get("order_items"),
+                "order_total": lead.get("order_total"),
                 # Campos de tracking de inactividad
                 "last_customer_message_at": lead.get("last_customer_message_at"),
                 "reminder_sent_at": lead.get("reminder_sent_at"),
+                # Campo para preferencia de aviso
+                "notify_preference": lead.get("notify_preference"),
             }
         return _get_default_lead_info()
     except Exception as e:  # pragma: no cover - log de conexión

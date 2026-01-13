@@ -39,6 +39,8 @@ from app.utils.validation import (
     looks_like_address,
     is_order_intent,
     is_new_order_request,
+    is_modification_request,
+    extract_notify_preference,
 )
 from app.utils.messages import (
     format_missing_fields_prompt,
@@ -60,6 +62,8 @@ from app.utils.messages import (
     format_order_already_completed,
     format_new_order_prompt,
     format_name_with_order_intent,
+    format_modification_prompt,
+    format_notify_preference_saved,
 )
 
 
@@ -363,6 +367,16 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
 
         # Si IA detecta que está listo para checkout
         if action == "ready_for_checkout":
+            # Guardar el pedido de la respuesta de IA
+            order_items = ai_response.get("order_items", [])
+            order_total = ai_response.get("total_price", 0)
+
+            if order_items:
+                # Convertir a JSON si es lista
+                import json
+                order_items_json = json.dumps(order_items, ensure_ascii=False) if isinstance(order_items, list) else order_items
+                update_lead_func(phone, order_items=order_items_json, order_total=order_total)
+
             if has_delivery_info(lead_info):
                 # Tiene todos los datos - ir a confirmar
                 update_lead_func(phone, status=ConversationState.CONFIRMING_ORDER.value)
@@ -433,8 +447,34 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
             update_lead_func(phone, status=ConversationState.BROWSING.value)
             reply_text = format_whatsapp_message(format_order_cancelled())
 
+        elif is_modification_request(text):
+            # El usuario quiere modificar el pedido - volver a BROWSING
+            update_lead_func(phone, status=ConversationState.BROWSING.value)
+            reply_text = format_whatsapp_message(format_modification_prompt())
+
         else:
-            reply_text = format_whatsapp_message(format_ask_confirmation_again())
+            # Si no es confirmación ni modificación clara, pasar a la IA para interpretar
+            ai_response = generate_gemini_response(phone, text, get_history_func)
+            ai_action = ai_response.get("action", "none")
+
+            if ai_action == "ready_for_checkout":
+                # La IA entendió un cambio y dio nuevo pedido
+                order_items = ai_response.get("order_items", [])
+                order_total = ai_response.get("total_price", 0)
+
+                if order_items:
+                    import json
+                    order_items_json = json.dumps(order_items, ensure_ascii=False) if isinstance(order_items, list) else order_items
+                    update_lead_func(phone, order_items=order_items_json, order_total=order_total)
+
+                # Mostrar nuevo resumen
+                order_summary = generate_order_summary(phone)
+                reply_text = ai_response.get("reply", "") + "\n\n" + format_whatsapp_message(format_order_confirmation(order_summary))
+            else:
+                # La IA respondió pero no con checkout - puede ser modificación
+                reply_text = ai_response.get("reply", "")
+                if not reply_text:
+                    reply_text = format_whatsapp_message(format_ask_confirmation_again())
 
     # ============================================================
     # ESTADO: COLLECTING_CEDULA (Nuevo estado - recolectando cédula)
@@ -539,11 +579,20 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                 email=None,
                 delivery_time=None,
                 payment_method=None,
+                order_items=None,
+                order_total=None,
             )
 
             reply_text = format_whatsapp_message(format_new_order_prompt())
         else:
-            reply_text = format_whatsapp_message(format_order_already_completed())
+            # Verificar si está respondiendo a la pregunta de cuándo quiere el próximo pedido
+            notify_pref = extract_notify_preference(text)
+            if notify_pref:
+                # Guardar la preferencia
+                update_lead_func(phone, notify_preference=notify_pref)
+                reply_text = format_whatsapp_message(format_notify_preference_saved(notify_pref))
+            else:
+                reply_text = format_whatsapp_message(format_order_already_completed())
 
     # ============================================================
     # FALLBACK: Respuesta de IA

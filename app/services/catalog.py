@@ -1,9 +1,7 @@
 import json
-import re
 from typing import Any
 
 from app.config import supabase, SEPARATOR, FREE_ITEM_LABEL
-from app.services.lead import get_history
 
 
 def get_productos_individuales() -> list[dict[str, Any]]:
@@ -63,61 +61,88 @@ def get_catalogo_completo() -> str:
     return json.dumps(catalogo, ensure_ascii=False)
 
 
-def generate_order_summary(phone: str) -> str:
-    """Genera un resumen detallado del pedido desde el historial."""
+def generate_order_summary_from_saved(order_items: list[str] | str | None, order_total: int | None) -> str:
+    """
+    Genera resumen del pedido desde datos guardados en el lead.
+
+    Args:
+        order_items: Lista de items o JSON string con los items del pedido
+        order_total: Total del pedido
+
+    Returns:
+        str: Resumen formateado del pedido
+    """
     default_summary = f"• Pedido personalizado\n{SEPARATOR}\n💰 Total: Consultar"
 
-    if not supabase:
+    if not order_items:
         return default_summary
 
-    try:
-        messages = get_history(phone, limit=20)
-
-        order_items: list[str] = []
-        total = 0
-
-        user_messages = [msg for msg in messages if msg["role"] == "user"]
-
-        for msg in user_messages:
-            text = msg["parts"][0].lower()
-
-            productos = get_productos_individuales()
-            for prod in productos:
-                prod_name = prod.get("nombre", "").lower()
-                if prod_name in text:
-                    qty_match = re.search(r"(\d+)\s*(?:kilos?|kg)", text)
-                    qty = int(qty_match.group(1)) if qty_match else 1
-
-                    price = prod.get("precio", 0) * qty
-                    order_items.append(f"• {prod.get('nombre', 'Producto')} x{qty} - ${price:,}")
-                    total += price
-                    break
-
-            combos = get_combos_completos()
-            for combo in combos:
-                combo_name = combo.get("nombre", "").lower()
-                if combo_name in text or combo.get("combo_key", "") in text:
-                    combo_price = combo.get("precio", 0)
-                    order_items.append(f"• {combo.get('nombre', 'Combo')} - ${combo_price:,}")
-
-                    if "items" in combo:
-                        for item in combo["items"]:
-                            if item.get("is_free", False):
-                                order_items.append(f"  🎁 {item.get('item_name', '')} - {FREE_ITEM_LABEL}")
-                            else:
-                                order_items.append(f"  • {item.get('item_name', '')}")
-
-                    total += combo_price
-                    break
-
-        if not order_items:
+    # Si es string JSON, parsear
+    if isinstance(order_items, str):
+        try:
+            order_items = json.loads(order_items)
+        except json.JSONDecodeError:
             return default_summary
 
-        summary = "\n".join(order_items)
-        summary += f"\n{SEPARATOR}\n💰 *Total: ${total:,}*"
-
-        return summary
-
-    except Exception as e:  # pragma: no cover - log de conexión
-        print(f"[ERROR] Error generando resumen de pedido: {e}")
+    if not order_items or not isinstance(order_items, list):
         return default_summary
+
+    # Formatear items
+    formatted_items = []
+    for item in order_items:
+        if isinstance(item, str):
+            # Si ya viene formateado, usarlo directo
+            if item.startswith("•") or item.startswith("🎁"):
+                formatted_items.append(item)
+            else:
+                formatted_items.append(f"• {item}")
+        elif isinstance(item, dict):
+            # Si viene como dict con name/price
+            name = item.get("name", item.get("nombre", "Producto"))
+            price = item.get("price", item.get("precio", 0))
+            qty = item.get("qty", item.get("cantidad", 1))
+            is_free = item.get("is_free", item.get("gratis", False))
+
+            if is_free:
+                formatted_items.append(f"🎁 {name} - {FREE_ITEM_LABEL}")
+            elif price:
+                formatted_items.append(f"• {name} x{qty} - ${price:,}")
+            else:
+                formatted_items.append(f"• {name} x{qty}")
+
+    if not formatted_items:
+        return default_summary
+
+    summary = "\n".join(formatted_items)
+
+    # Agregar total
+    if order_total and order_total > 0:
+        summary += f"\n{SEPARATOR}\n💰 *Total: ${order_total:,}*"
+    else:
+        summary += f"\n{SEPARATOR}\n💰 Total: Consultar"
+
+    return summary
+
+
+def generate_order_summary(phone: str) -> str:
+    """
+    Genera un resumen del pedido usando los datos guardados en el lead.
+
+    Args:
+        phone: Teléfono del cliente
+
+    Returns:
+        str: Resumen formateado del pedido
+    """
+    from app.services.lead import get_lead_info, is_test_phone, test_conversations
+
+    # Obtener info del lead
+    if is_test_phone(phone):
+        lead_info = test_conversations.get(phone, {})
+    else:
+        lead_info = get_lead_info(phone)
+
+    order_items = lead_info.get("order_items")
+    order_total = lead_info.get("order_total")
+
+    return generate_order_summary_from_saved(order_items, order_total)

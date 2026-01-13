@@ -80,7 +80,7 @@ def format_delivery_info_request(name: str) -> str:
         "Envíalos separados por comas:\n\n"
         "📝 *Ejemplo:*\n"
         "Bogotá, Calle 123 #45-67, correo@ejemplo.com\n\n"
-        "⏰ Tiempo de entrega: 24 horas."
+        "⏰ Te estaremos avisando cuando tu pedido esté en camino."
     )
 
 
@@ -202,8 +202,10 @@ def format_payment_completed_transfer(schedule_ack: str = "") -> str:
     return (
         f"{schedule_ack}"
         "¡Pago verificado y pedido confirmado! 🎉\n\n"
-        "Tu orden está siendo preparada y saldrá pronto hacia tu dirección.\n\n"
-        "Te contactaremos cuando el pedido esté en camino. ¡Gracias por tu compra!"
+        "Tu orden está siendo preparada.\n\n"
+        "Te estaremos avisando cuando tu pedido esté en camino. ¡Gracias por tu compra!\n\n"
+        "Por último, ¿en cuánto tiempo te gustaría hacer tu próximo pedido? 🗓️\n"
+        "Así te recordamos cuando sea el momento."
     )
 
 
@@ -213,9 +215,10 @@ def format_payment_completed_cash() -> str:
     """
     return (
         "¡Pedido confirmado! 🎉\n\n"
-        "Tu orden está siendo preparada y saldrá pronto hacia tu dirección. "
-        "Pagarás en efectivo al recibir.\n\n"
-        "Te contactaremos cuando el pedido esté en camino. ¡Gracias por tu compra!"
+        "Tu orden está siendo preparada. Pagarás en efectivo al recibir.\n\n"
+        "Te estaremos avisando cuando tu pedido esté en camino. ¡Gracias por tu compra!\n\n"
+        "Por último, ¿en cuánto tiempo te gustaría hacer tu próximo pedido? 🗓️\n"
+        "Así te recordamos cuando sea el momento."
     )
 
 
@@ -288,4 +291,28 @@ def format_name_with_order_intent() -> str:
         "¡Perfecto! Veo que quieres hacer un pedido. 🥩\n\n"
         "Antes de continuar, ¿me puedes decir tu nombre?\n\n"
         "📝 *Ejemplo:* Juan"
+    )
+
+
+def format_modification_prompt() -> str:
+    """
+    Mensaje cuando el usuario quiere modificar el pedido.
+    """
+    return (
+        "Entendido, vamos a modificar tu pedido. 📝\n\n"
+        "Dime qué cambios quieres hacer:\n"
+        "• ¿Agregar más productos?\n"
+        "• ¿Quitar algo del pedido?\n"
+        "• ¿Cambiar cantidades?\n\n"
+        "Cuéntame y te ayudo."
+    )
+
+
+def format_notify_preference_saved(preference: str) -> str:
+    """
+    Mensaje de confirmación de preferencia de aviso guardada.
+    """
+    return (
+        f"¡Perfecto! Anotado: te avisaremos *{preference}* para tu próximo pedido. 📝\n\n"
+        "¡Fue un placer atenderte! Si necesitas algo más, aquí estaremos. 🥩"
     )

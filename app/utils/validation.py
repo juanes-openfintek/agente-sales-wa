@@ -473,3 +473,126 @@ def is_new_order_request(text: str) -> bool:
             return True
 
     return False
+
+
+def is_modification_request(text: str) -> bool:
+    """
+    Detecta si el texto es una solicitud de modificación del pedido.
+
+    Returns:
+        bool: True si quiere modificar el pedido
+    """
+    if not text:
+        return False
+
+    lower = text.lower().strip()
+
+    modification_phrases = [
+        # Cambiar/modificar
+        "cambiar",
+        "modificar",
+        "editar",
+        "corregir",
+        # Agregar
+        "agregar",
+        "añadir",
+        "adicionar",
+        "incluir",
+        "sumar",
+        "poner",
+        "meter",
+        # Quitar
+        "quitar",
+        "eliminar",
+        "remover",
+        "sacar",
+        "borrar",
+        "sin",
+        # Cambiar cantidad
+        "mas",
+        "más",
+        "menos",
+        "otro",
+        "otra",
+        "otros",
+        "otras",
+        # Intenciones de cambio
+        "en vez de",
+        "en lugar de",
+        "mejor",
+        "prefiero",
+        "quisiera",
+        "quiero otro",
+        "quiero otra",
+        "no ese",
+        "no eso",
+        "ese no",
+        "eso no",
+    ]
+
+    for phrase in modification_phrases:
+        if phrase in lower:
+            return True
+
+    return False
+
+
+def extract_notify_preference(text: str) -> str | None:
+    """
+    Extrae la preferencia de tiempo para el próximo pedido/aviso.
+
+    Returns:
+        str | None: Preferencia de tiempo o None si no se encontró
+    """
+    if not text:
+        return None
+
+    lower = text.lower().strip()
+
+    # Patrones de tiempo específicos
+    time_patterns = [
+        # Días específicos
+        (r"\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b", None),
+        # Semanas
+        (r"\b(\d+)\s*semanas?\b", lambda m: f"{m.group(1)} semana(s)"),
+        (r"\buna semana\b", "1 semana"),
+        (r"\bdos semanas\b", "2 semanas"),
+        (r"\btres semanas\b", "3 semanas"),
+        (r"\bpr[oó]xima semana\b", "próxima semana"),
+        # Meses
+        (r"\b(\d+)\s*mes(?:es)?\b", lambda m: f"{m.group(1)} mes(es)"),
+        (r"\bun mes\b", "1 mes"),
+        (r"\bdos meses\b", "2 meses"),
+        # Días
+        (r"\b(\d+)\s*d[ií]as?\b", lambda m: f"{m.group(1)} día(s)"),
+        (r"\bma[nñ]ana\b", "mañana"),
+        (r"\bpasado ma[nñ]ana\b", "pasado mañana"),
+        # Quincenas
+        (r"\bquincena\b", "15 días"),
+        (r"\bquincenal\b", "cada 15 días"),
+        # Fechas
+        (r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", None),
+        # Expresiones generales
+        (r"\bfin de mes\b", "fin de mes"),
+        (r"\bfin de semana\b", "fin de semana"),
+        (r"\bprincipios de mes\b", "principios de mes"),
+    ]
+
+    import re
+    for pattern, replacement in time_patterns:
+        match = re.search(pattern, lower)
+        if match:
+            if replacement is None:
+                return match.group(0).capitalize()
+            elif callable(replacement):
+                return replacement(match)
+            else:
+                return replacement
+
+    # Si no encontró patrones específicos pero menciona tiempo
+    general_time_words = ["pronto", "después", "luego", "cuando pueda", "ya te aviso", "te confirmo"]
+    for word in general_time_words:
+        if word in lower:
+            return word.capitalize()
+
+    return None
