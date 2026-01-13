@@ -8,6 +8,84 @@ from app.services.lead import get_history as get_history_default
 from app.services.lead import get_lead_info
 
 
+def extract_name_with_ai(user_text: str) -> str | None:
+    """
+    Usa Gemini para extraer el nombre de una respuesta del usuario.
+    Es más robusto que algoritmos basados en reglas.
+    
+    Args:
+        user_text: El texto que el usuario envió cuando se le preguntó su nombre
+        
+    Returns:
+        str | None: El nombre extraído o None si no se pudo identificar
+    """
+    if not model:
+        return None
+    
+    if not user_text or len(user_text.strip()) < 2:
+        return None
+    
+    prompt = f"""Eres un asistente que extrae nombres de personas de mensajes de texto.
+
+El usuario respondió a la pregunta "¿Cuál es tu nombre?" con el siguiente mensaje:
+"{user_text}"
+
+Tu tarea es extraer SOLO el nombre de la persona. 
+
+REGLAS:
+1. Extrae SOLO el nombre propio (puede incluir apellido si lo mencionó)
+2. Ignora saludos, comentarios adicionales, quejas, o cualquier texto que no sea el nombre
+3. Si el mensaje contiene frases como "me llamo X", "soy X", "mi nombre es X", extrae solo X
+4. Si no puedes identificar un nombre válido, responde exactamente: NO_NAME
+5. Un nombre válido tiene entre 2 y 50 caracteres y solo contiene letras y espacios
+6. NO incluyas puntuación, números, ni palabras que no sean parte del nombre
+
+Ejemplos:
+- "Hola me llamo Juan" → Juan
+- "Si, mi nombre es Pedro pero no se para que lo necesitas" → Pedro
+- "Maria Garcia" → Maria Garcia
+- "soy carlos y quiero pedir" → Carlos
+- "Buenos dias soy la señora Martha" → Martha
+- "Quiero ver el menú" → NO_NAME
+- "123456" → NO_NAME
+- "hola" → NO_NAME
+- "Si claro, me llamo Ana María Pérez" → Ana María Pérez
+- "Jajaja ok soy Roberto" → Roberto
+
+Responde SOLO con el nombre extraído (capitalizado correctamente) o NO_NAME. Sin explicaciones adicionales."""
+
+    try:
+        response = model.generate_content(prompt)
+        result = response.text.strip()
+        
+        print(f"[AI NAME] Input: '{user_text}' → Output: '{result}'")
+        
+        # Verificar si no se encontró nombre
+        if result == "NO_NAME" or result.upper() == "NO_NAME":
+            return None
+        
+        # Limpiar el resultado
+        # Remover posibles comillas o caracteres extra
+        result = result.strip('"\'').strip()
+        
+        # Validar que el resultado sea un nombre válido
+        if len(result) < 2 or len(result) > 50:
+            return None
+        
+        # Verificar que solo contenga caracteres válidos para un nombre
+        if not re.match(r"^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s'-]+$", result):
+            return None
+        
+        # Capitalizar correctamente
+        result = result.title()
+        
+        return result
+        
+    except Exception as e:
+        print(f"[AI NAME ERROR] Error extrayendo nombre: {e}")
+        return None
+
+
 def format_whatsapp_message(text: str) -> str:
     """Formatea texto para WhatsApp con el formato correcto."""
     text = text.replace("━━━━━━━━━━━━━━━━━━━━━", "━━━━━━━━━━━━━━━━━━━━━")

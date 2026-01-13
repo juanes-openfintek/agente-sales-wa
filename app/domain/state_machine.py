@@ -13,7 +13,7 @@ from app.config import (
     SEPARATOR,
     supabase,
 )
-from app.services.ai import format_whatsapp_message, generate_gemini_response
+from app.services.ai import extract_name_with_ai, format_whatsapp_message, generate_gemini_response
 from app.services.catalog import generate_order_summary
 from app.services.lead import (
     get_history,
@@ -216,30 +216,59 @@ def save_next_order_preference(phone: str, preference: str, save_event_func) -> 
 # ============================================================
 # CACHE PARA DEDUPLICACIÓN DE MENSAJES
 # ============================================================
+import time as _time_module
+
 # Guarda message_ids procesados recientemente para evitar duplicados
 _processed_messages: dict[str, float] = {}
 _MESSAGE_CACHE_TTL_SECONDS = 60  # Tiempo de vida del cache
 
+# Rate limiting por teléfono - evita procesar mensajes muy seguidos del mismo usuario
+_last_message_by_phone: dict[str, tuple[float, str]] = {}  # phone -> (timestamp, text)
+_MIN_MESSAGE_INTERVAL_SECONDS = 3  # Mínimo 3 segundos entre mensajes del mismo usuario
+
 
 def _cleanup_message_cache() -> None:
     """Limpia mensajes antiguos del cache."""
-    import time
-    now = time.time()
+    now = _time_module.time()
     expired = [k for k, v in _processed_messages.items() if now - v > _MESSAGE_CACHE_TTL_SECONDS]
     for k in expired:
         del _processed_messages[k]
 
+    # Limpiar también el rate limiter
+    expired_phones = [k for k, (t, _) in _last_message_by_phone.items() if now - t > _MESSAGE_CACHE_TTL_SECONDS]
+    for k in expired_phones:
+        del _last_message_by_phone[k]
+
 
 def _is_duplicate_message(message_id: str) -> bool:
-    """Verifica si un mensaje ya fue procesado."""
-    import time
+    """Verifica si un mensaje ya fue procesado por ID."""
     _cleanup_message_cache()
 
     if message_id in _processed_messages:
         print(f"[DUPLICATE] Mensaje {message_id} ya procesado, ignorando...")
         return True
 
-    _processed_messages[message_id] = time.time()
+    _processed_messages[message_id] = _time_module.time()
+    return False
+
+
+def _is_rate_limited(phone: str, text: str) -> bool:
+    """
+    Verifica si el mensaje debe ser ignorado por rate limiting.
+    Ignora mensajes idénticos del mismo usuario en menos de 3 segundos.
+    """
+    now = _time_module.time()
+
+    if phone in _last_message_by_phone:
+        last_time, last_text = _last_message_by_phone[phone]
+        time_diff = now - last_time
+
+        # Si es el mismo texto en menos de 3 segundos, es duplicado
+        if time_diff < _MIN_MESSAGE_INTERVAL_SECONDS and last_text == text:
+            print(f"[RATE_LIMIT] Mensaje duplicado de {phone} en {time_diff:.1f}s, ignorando...")
+            return True
+
+    _last_message_by_phone[phone] = (now, text)
     return False
 
 
@@ -292,6 +321,10 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
 
     if not phone or (not text and not has_image):
         return {"ok": True, "ignored": True}
+
+    # Rate limiting - evitar mensajes duplicados muy seguidos del mismo usuario
+    if text and _is_rate_limited(phone, text):
+        return {"ok": True, "ignored": True, "reason": "rate_limited"}
 
     print(f"📩 [MSG] De: {phone} | Texto: {text[:30]}... | ID: {message_id}")
 
@@ -369,22 +402,22 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                 # El usuario quiere pedir pero no dio su nombre
                 reply_text = format_whatsapp_message(format_name_with_order_intent())
             else:
-                # Intentar extraer nombre con validación mejorada
-                is_valid, result = validate_name(text)
-
-                if is_valid:
-                    name = result  # result contiene el nombre limpio
+                # Intentar extraer nombre usando IA (más robusto que reglas)
+                extracted_name = extract_name_with_ai(text)
+                
+                if extracted_name:
+                    # IA pudo extraer un nombre válido
                     contact_phone = lead_info.get("contact_phone") or phone
                     update_lead_func(
                         phone,
-                        name=name,
+                        name=extracted_name,
                         contact_phone=contact_phone,
                         status=ConversationState.BROWSING.value
                     )
-                    reply_text = format_whatsapp_message(format_name_captured(name))
+                    reply_text = format_whatsapp_message(format_name_captured(extracted_name))
                 else:
-                    # Validación falló - pedir nombre de nuevo con feedback
-                    reply_text = format_whatsapp_message(format_validation_error("nombre", result))
+                    # IA no pudo extraer nombre - pedir de nuevo
+                    reply_text = format_whatsapp_message(format_ask_name_again())
 
     # ============================================================
     # ESTADO: BROWSING (Navegando catálogo)

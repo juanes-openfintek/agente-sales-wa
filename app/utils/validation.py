@@ -53,8 +53,12 @@ ADDRESS_KEYWORDS: Final[tuple[str, ...]] = (
     "#",
 )
 
-# Frases comunes a remover del nombre
+# Frases comunes a remover del nombre (prefijos)
 NAME_PHRASES_TO_REMOVE: Final[tuple[str, ...]] = (
+    "si,",
+    "sí,",
+    "si ",
+    "sí ",
     "me llamo",
     "mi nombre es",
     "mi nombre completo es",
@@ -69,6 +73,26 @@ NAME_PHRASES_TO_REMOVE: Final[tuple[str, ...]] = (
     "buen dia",
     "buen día",
     "hola",
+)
+
+# Palabras que cortan el nombre (lo que viene después no es parte del nombre)
+NAME_CUTOFF_WORDS: Final[tuple[str, ...]] = (
+    " pero ",
+    " aunque ",
+    " sin embargo ",
+    " y ",
+    " no se ",
+    " no sé ",
+    " para que ",
+    " porque ",
+    " ya que ",
+    " solo que ",
+    " es que ",
+    " la verdad ",
+    " la neta ",
+    " esque ",
+    " osea ",
+    " o sea ",
 )
 
 # Palabras/frases que indican intención de pedido (NO es un nombre)
@@ -183,6 +207,7 @@ def validate_email(email: str) -> tuple[bool, str | None]:
 def validate_name(name: str) -> tuple[bool, str | None]:
     """
     Valida y limpia el nombre del cliente.
+    Extrae el nombre de frases complejas como "mi nombre es Pedro pero no sé para qué".
 
     Returns:
         tuple[bool, str | None]: (es_válido, nombre_limpio_o_error)
@@ -192,11 +217,16 @@ def validate_name(name: str) -> tuple[bool, str | None]:
     if not name:
         return False, "Por favor escribe tu nombre"
 
-    # Limpiar frases comunes
+    # Limpiar frases comunes (prefijos)
     clean_name = name.lower().strip()
 
     for phrase in NAME_PHRASES_TO_REMOVE:
         clean_name = clean_name.replace(phrase, "")
+
+    # IMPORTANTE: Cortar en palabras de conexión que indican que lo siguiente no es nombre
+    for cutoff in NAME_CUTOFF_WORDS:
+        if cutoff in clean_name:
+            clean_name = clean_name.split(cutoff)[0]
 
     # Remover dígitos
     clean_name = re.sub(r"\d+", "", clean_name)

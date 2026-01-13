@@ -189,21 +189,19 @@ def format_transfer_proof_request(payment_method: str) -> str:
     """
     return (
         f"Excelente. Por favor envía el comprobante de tu transferencia {payment_method} "
-        "para confirmar tu pedido. Puedes enviarlo como imagen o screenshot.\n\n"
-        "De una vez vamos a organizar tu siguiente pedido, tenemos disponibilidad "
-        "para dentro de 1-2 semanas, ¿para qué día lo prefieres?"
+        "para confirmar tu pedido. Puedes enviarlo como imagen o screenshot."
     )
 
 
 def format_payment_completed_transfer(schedule_ack: str = "") -> str:
     """
-    Mensaje de pago completado (transferencia).
+    Mensaje cuando se recibe el comprobante de transferencia.
+    El pago queda en revisión y pasa a un humano.
     """
     return (
         f"{schedule_ack}"
-        "¡Pago verificado y pedido confirmado! 🎉\n\n"
-        "Tu orden está siendo preparada.\n\n"
-        "Te estaremos avisando cuando tu pedido esté en camino. ¡Gracias por tu compra!\n\n"
+        "¡Comprobante recibido! 📋\n\n"
+        "Tu pago está *en revisión*. Un asesor lo verificará y te confirmará a la brevedad.\n\n"
         "Por último, ¿en cuánto tiempo te gustaría hacer tu próximo pedido? 🗓️\n"
         "Así te recordamos cuando sea el momento."
     )
