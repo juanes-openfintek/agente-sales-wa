@@ -53,6 +53,8 @@ def get_test_lead_info(phone: str) -> dict[str, Any]:
             "reminder_sent_at": None,
             # Campo para preferencia de aviso
             "notify_preference": None,
+            # Campo para evitar respuestas repetitivas en estado completado
+            "completed_message_sent": None,
         }
 
     return test_conversations[phone].copy()
@@ -86,7 +88,12 @@ def save_test_event(phone: str, direction: str, text: str, metadata: dict[str, A
         test_conversations[phone]["last_customer_message_at"] = datetime.now().isoformat()
         test_conversations[phone]["reminder_sent_at"] = None  # Limpiar reminder al recibir respuesta
 
-    print(f"[TEST] Evento guardado para {phone}: {direction} - {text[:50]}...")
+    # Usar encode/decode para evitar errores de encoding con emojis en Windows
+    try:
+        text_preview = text[:50].encode('ascii', 'replace').decode('ascii')
+    except Exception:
+        text_preview = text[:50]
+    print(f"[TEST] Evento guardado para {phone}: {direction} - {text_preview}...")
 
 
 def get_test_history(phone: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -149,6 +156,8 @@ def _get_default_lead_info() -> dict[str, Any]:
         "reminder_sent_at": None,
         # Campo para preferencia de aviso
         "notify_preference": None,
+        # Campo para evitar respuestas repetitivas en estado completado
+        "completed_message_sent": None,
     }
 
 
@@ -180,6 +189,8 @@ def get_lead_info(phone: str) -> dict[str, Any]:
                 "reminder_sent_at": lead.get("reminder_sent_at"),
                 # Campo para preferencia de aviso
                 "notify_preference": lead.get("notify_preference"),
+                # Campo para evitar respuestas repetitivas en estado completado
+                "completed_message_sent": lead.get("completed_message_sent"),
             }
         return _get_default_lead_info()
     except Exception as e:  # pragma: no cover - log de conexión

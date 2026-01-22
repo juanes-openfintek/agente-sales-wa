@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
 requests
+httpx
+convex
 supabase
 python-dotenv
 google-generativeai

@@ -217,58 +217,119 @@ def save_next_order_preference(phone: str, preference: str, save_event_func) -> 
 # CACHE PARA DEDUPLICACIÓN DE MENSAJES
 # ============================================================
 import time as _time_module
+import hashlib as _hashlib
+import threading as _threading
+
+# Lock para operaciones thread-safe
+_cache_lock = _threading.Lock()
 
 # Guarda message_ids procesados recientemente para evitar duplicados
 _processed_messages: dict[str, float] = {}
-_MESSAGE_CACHE_TTL_SECONDS = 60  # Tiempo de vida del cache
+_MESSAGE_CACHE_TTL_SECONDS = 120  # Aumentado a 2 minutos
 
 # Rate limiting por teléfono - evita procesar mensajes muy seguidos del mismo usuario
 _last_message_by_phone: dict[str, tuple[float, str]] = {}  # phone -> (timestamp, text)
-_MIN_MESSAGE_INTERVAL_SECONDS = 3  # Mínimo 3 segundos entre mensajes del mismo usuario
+_MIN_MESSAGE_INTERVAL_SECONDS = 5  # Aumentado a 5 segundos entre mensajes idénticos
+
+# Cache de mensajes en proceso - evita condiciones de carrera
+_messages_in_progress: dict[str, float] = {}  # hash -> timestamp
+_IN_PROGRESS_TTL_SECONDS = 30  # Un mensaje puede estar "en proceso" máximo 30 segundos
+
+
+def _get_message_hash(phone: str, text: str) -> str:
+    """Genera un hash único para un mensaje basado en teléfono y contenido."""
+    content = f"{phone}:{text.strip().lower()}"
+    return _hashlib.md5(content.encode()).hexdigest()
 
 
 def _cleanup_message_cache() -> None:
     """Limpia mensajes antiguos del cache."""
     now = _time_module.time()
-    expired = [k for k, v in _processed_messages.items() if now - v > _MESSAGE_CACHE_TTL_SECONDS]
-    for k in expired:
-        del _processed_messages[k]
+    
+    with _cache_lock:
+        # Limpiar message_ids procesados
+        expired = [k for k, v in _processed_messages.items() if now - v > _MESSAGE_CACHE_TTL_SECONDS]
+        for k in expired:
+            del _processed_messages[k]
 
-    # Limpiar también el rate limiter
-    expired_phones = [k for k, (t, _) in _last_message_by_phone.items() if now - t > _MESSAGE_CACHE_TTL_SECONDS]
-    for k in expired_phones:
-        del _last_message_by_phone[k]
+        # Limpiar rate limiter
+        expired_phones = [k for k, (t, _) in _last_message_by_phone.items() if now - t > _MESSAGE_CACHE_TTL_SECONDS]
+        for k in expired_phones:
+            del _last_message_by_phone[k]
+        
+        # Limpiar mensajes en proceso
+        expired_in_progress = [k for k, v in _messages_in_progress.items() if now - v > _IN_PROGRESS_TTL_SECONDS]
+        for k in expired_in_progress:
+            del _messages_in_progress[k]
 
 
 def _is_duplicate_message(message_id: str) -> bool:
     """Verifica si un mensaje ya fue procesado por ID."""
     _cleanup_message_cache()
 
-    if message_id in _processed_messages:
-        print(f"[DUPLICATE] Mensaje {message_id} ya procesado, ignorando...")
-        return True
+    with _cache_lock:
+        if message_id in _processed_messages:
+            print(f"[DUPLICATE] Mensaje {message_id} ya procesado, ignorando...")
+            return True
 
-    _processed_messages[message_id] = _time_module.time()
+        _processed_messages[message_id] = _time_module.time()
     return False
+
+
+def _is_message_in_progress(phone: str, text: str) -> bool:
+    """
+    Verifica si un mensaje idéntico está siendo procesado actualmente.
+    Previene condiciones de carrera cuando llegan múltiples webhooks simultáneos.
+    """
+    msg_hash = _get_message_hash(phone, text)
+    now = _time_module.time()
+    
+    with _cache_lock:
+        if msg_hash in _messages_in_progress:
+            started = _messages_in_progress[msg_hash]
+            if now - started < _IN_PROGRESS_TTL_SECONDS:
+                print(f"[IN_PROGRESS] Mensaje de {phone} ya está siendo procesado, ignorando...")
+                return True
+        
+        # Marcar como en proceso
+        _messages_in_progress[msg_hash] = now
+    
+    return False
+
+
+def _mark_message_completed(phone: str, text: str) -> None:
+    """Marca un mensaje como completado (ya no está en proceso)."""
+    msg_hash = _get_message_hash(phone, text)
+    
+    with _cache_lock:
+        if msg_hash in _messages_in_progress:
+            del _messages_in_progress[msg_hash]
 
 
 def _is_rate_limited(phone: str, text: str) -> bool:
     """
     Verifica si el mensaje debe ser ignorado por rate limiting.
-    Ignora mensajes idénticos del mismo usuario en menos de 3 segundos.
+    Ignora mensajes idénticos del mismo usuario en menos de 5 segundos.
+    También ignora CUALQUIER mensaje del mismo usuario en menos de 1 segundo.
     """
     now = _time_module.time()
 
-    if phone in _last_message_by_phone:
-        last_time, last_text = _last_message_by_phone[phone]
-        time_diff = now - last_time
+    with _cache_lock:
+        if phone in _last_message_by_phone:
+            last_time, last_text = _last_message_by_phone[phone]
+            time_diff = now - last_time
 
-        # Si es el mismo texto en menos de 3 segundos, es duplicado
-        if time_diff < _MIN_MESSAGE_INTERVAL_SECONDS and last_text == text:
-            print(f"[RATE_LIMIT] Mensaje duplicado de {phone} en {time_diff:.1f}s, ignorando...")
-            return True
+            # Si es CUALQUIER mensaje en menos de 1 segundo, es sospechoso
+            if time_diff < 1:
+                print(f"[RATE_LIMIT] Mensaje de {phone} muy rapido ({time_diff:.2f}s), ignorando...")
+                return True
+            
+            # Si es el mismo texto en menos de 5 segundos, es duplicado
+            if time_diff < _MIN_MESSAGE_INTERVAL_SECONDS and last_text.strip().lower() == text.strip().lower():
+                print(f"[RATE_LIMIT] Mensaje duplicado de {phone} en {time_diff:.1f}s, ignorando...")
+                return True
 
-    _last_message_by_phone[phone] = (now, text)
+        _last_message_by_phone[phone] = (now, text)
     return False
 
 
@@ -325,8 +386,12 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
     # Rate limiting - evitar mensajes duplicados muy seguidos del mismo usuario
     if text and _is_rate_limited(phone, text):
         return {"ok": True, "ignored": True, "reason": "rate_limited"}
+    
+    # Verificar si el mensaje ya está siendo procesado (condición de carrera)
+    if text and _is_message_in_progress(phone, text):
+        return {"ok": True, "ignored": True, "reason": "in_progress"}
 
-    print(f"📩 [MSG] De: {phone} | Texto: {text[:30]}... | ID: {message_id}")
+    print(f"[MSG] De: {phone} | Texto: {text[:30]}... | ID: {message_id}")
 
     # Determinar modo de prueba
     is_demo = raw.get("demo", False) or "demo" in phone.lower() or phone == "user"
@@ -447,10 +512,10 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
 
             if has_delivery_info(lead_info):
                 # Tiene todos los datos - ir a confirmar
+                # NOTA: La IA ya incluye el resumen en su respuesta, no agregar otro
                 update_lead_func(phone, status=ConversationState.CONFIRMING_ORDER.value)
-                order_summary = generate_order_summary(phone)
-                reply_text += "\n\n" + format_whatsapp_message(format_order_confirmation(order_summary))
                 current_state = ConversationState.CONFIRMING_ORDER.value
+                # Solo usar la respuesta de la IA (ya tiene el resumen)
             else:
                 # Faltan datos - ir a collecting_delivery_info
                 update_lead_func(phone, status=ConversationState.COLLECTING_DELIVERY_INFO.value)
@@ -535,9 +600,8 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                     order_items_json = json.dumps(order_items, ensure_ascii=False) if isinstance(order_items, list) else order_items
                     update_lead_func(phone, order_items=order_items_json, order_total=order_total)
 
-                # Mostrar nuevo resumen
-                order_summary = generate_order_summary(phone)
-                reply_text = ai_response.get("reply", "") + "\n\n" + format_whatsapp_message(format_order_confirmation(order_summary))
+                # NOTA: La IA ya incluye el resumen en su respuesta, no agregar otro
+                reply_text = ai_response.get("reply", "")
             else:
                 # La IA respondió pero no con checkout - puede ser modificación
                 reply_text = ai_response.get("reply", "")
@@ -649,6 +713,7 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                 payment_method=None,
                 order_items=None,
                 order_total=None,
+                completed_message_sent=None,  # Resetear para nuevo pedido
             )
 
             reply_text = format_whatsapp_message(format_new_order_prompt())
@@ -656,32 +721,44 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
             # Verificar si está respondiendo a la pregunta de cuándo quiere el próximo pedido
             notify_pref = extract_notify_preference(text)
             if notify_pref:
-                # Guardar la preferencia
-                update_lead_func(phone, notify_preference=notify_pref)
+                # Guardar la preferencia y marcar que ya respondió
+                update_lead_func(phone, notify_preference=notify_pref, completed_message_sent=True)
                 reply_text = format_whatsapp_message(format_notify_preference_saved(notify_pref))
-            else:
+            elif not lead_info.get("completed_message_sent"):
+                # Primera vez que escribe después de completar - enviar mensaje y marcar
+                update_lead_func(phone, completed_message_sent=True)
                 reply_text = format_whatsapp_message(format_order_already_completed())
+            else:
+                # Ya se envió el mensaje antes - NO responder (dejar que un humano intervenga)
+                # Guardar el evento pero no enviar respuesta
+                reply_text = ""  # No responder
 
     # ============================================================
     # FALLBACK: Respuesta de IA
     # ============================================================
-    if not reply_text:
+    # Solo usar fallback si no hay respuesta Y no estamos en estado completado silencioso
+    if not reply_text and current_state != ConversationState.PAYMENT_COMPLETED.value:
         ai_response = generate_gemini_response(phone, text, get_history_func)
         reply_text = ai_response.get("reply", "Lo siento, ¿podrías repetir eso?")
 
-    # Guardar evento de salida
-    metadata = {
-        "product_id": ai_response.get("suggested_product_id") if ai_response else None,
-        "image": image_url,
-        "action": action,
-    }
-    save_event_func(phone, "out", reply_text, metadata)
+    # Solo guardar y enviar si hay respuesta
+    if reply_text:
+        # Guardar evento de salida
+        metadata = {
+            "product_id": ai_response.get("suggested_product_id") if ai_response else None,
+            "image": image_url,
+            "action": action,
+        }
+        save_event_func(phone, "out", reply_text, metadata)
 
-    # Enviar mensaje por WhatsApp
-    if not is_demo and EVOLUTION_APIKEY:
-        status, response = send_whatsapp(phone, reply_text, image_url)
-        if status < 200 or status >= 300:
-            print(f"[ERROR SEND] ({status}) Falló envío a {phone}: {response}")
+        # Enviar mensaje por WhatsApp
+        if not is_demo and EVOLUTION_APIKEY:
+            status, response = send_whatsapp(phone, reply_text, image_url)
+            if status < 200 or status >= 300:
+                print(f"[ERROR SEND] ({status}) Fallo envio a {phone}: {response}")
+    else:
+        # No hay respuesta - modo silencioso (humano debe intervenir)
+        print(f"[SILENT] No se envía respuesta a {phone} - esperando intervención humana")
 
     # Obtener estado actualizado para la respuesta
     if is_test:
@@ -691,4 +768,8 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
     
     new_status = final_lead_info.get("status", current_state)
 
+    # Marcar mensaje como completado
+    if text:
+        _mark_message_completed(phone, text)
+    
     return {"reply": reply_text, "image": image_url, "action": action, "new_status": new_status}

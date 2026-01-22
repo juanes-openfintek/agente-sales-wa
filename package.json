@@ -1,0 +1,18 @@
+{
+  "name": "agente-sales-wa",
+  "version": "1.0.0",
+  "description": "Agente de ventas WhatsApp con Convex",
+  "main": "index.js",
+  "scripts": {
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy",
+    "convex:push": "convex deploy --cmd 'echo deployed'",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "convex": "^1.31.4"
+  }
+}
