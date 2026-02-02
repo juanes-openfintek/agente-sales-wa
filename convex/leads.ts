@@ -61,6 +61,8 @@ export const create = mutation({
     paymentMethod: v.optional(v.string()),
     orderItems: v.optional(v.string()),
     orderTotal: v.optional(v.number()),
+    paymentInfo: v.optional(v.any()),
+    lastMessage: v.optional(v.string()),
     notifyPreference: v.optional(v.string()),
     totalOrders: v.optional(v.number()),
     completedMessageSent: v.optional(v.boolean()),
@@ -71,6 +73,8 @@ export const create = mutation({
       ...args,
       lastCustomerMessageAt: now,
       totalOrders: args.totalOrders ?? 0,
+      createdAt: now,
+      updatedAt: now,
     });
   },
 });
@@ -91,11 +95,14 @@ export const update = mutation({
     paymentMethod: v.optional(v.string()),
     orderItems: v.optional(v.string()),
     orderTotal: v.optional(v.number()),
+    paymentInfo: v.optional(v.any()),
+    lastMessage: v.optional(v.string()),
     lastCustomerMessageAt: v.optional(v.number()),
     reminderSentAt: v.optional(v.number()),
     notifyPreference: v.optional(v.string()),
     totalOrders: v.optional(v.number()),
     completedMessageSent: v.optional(v.boolean()),
+    currentOrderId: v.optional(v.id("orders")),
   },
   handler: async (ctx, args) => {
     const { phone, ...updates } = args;
@@ -110,12 +117,15 @@ export const update = mutation({
       throw new Error(`Lead not found: ${phone}`);
     }
 
-    // Filtrar campos undefined
+    // Filtrar campos undefined y agregar updatedAt
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates).filter(([_, v]) => v !== undefined)
     );
 
-    await ctx.db.patch(lead._id, filteredUpdates);
+    await ctx.db.patch(lead._id, {
+      ...filteredUpdates,
+      updatedAt: Date.now(),
+    });
     return lead._id;
   },
 });
@@ -136,14 +146,20 @@ export const upsert = mutation({
     paymentMethod: v.optional(v.string()),
     orderItems: v.optional(v.string()),
     orderTotal: v.optional(v.number()),
+    paymentInfo: v.optional(v.any()),
+    lastMessage: v.optional(v.string()),
     lastCustomerMessageAt: v.optional(v.number()),
     reminderSentAt: v.optional(v.number()),
     notifyPreference: v.optional(v.string()),
     totalOrders: v.optional(v.number()),
     completedMessageSent: v.optional(v.boolean()),
+    // Timestamps opcionales para migración
+    createdAt: v.optional(v.number()),
+    updatedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { phone, ...data } = args;
+    const { phone, createdAt, updatedAt, ...data } = args;
+    const now = Date.now();
 
     // Buscar lead existente
     const existingLead = await ctx.db
@@ -156,14 +172,19 @@ export const upsert = mutation({
       const filteredUpdates = Object.fromEntries(
         Object.entries(data).filter(([_, v]) => v !== undefined)
       );
-      await ctx.db.patch(existingLead._id, filteredUpdates);
+      await ctx.db.patch(existingLead._id, {
+        ...filteredUpdates,
+        updatedAt: updatedAt ?? now,
+      });
       return { action: "updated", id: existingLead._id };
     } else {
       // Crear nuevo
       const id = await ctx.db.insert("leads", {
         phone,
-        status: data.status || "new",
+        status: data.status || "collecting_info",
         ...data,
+        createdAt: createdAt ?? now,
+        updatedAt: updatedAt ?? now,
       });
       return { action: "created", id };
     }
@@ -182,6 +203,7 @@ export const updateLastMessageTime = mutation({
     if (lead) {
       await ctx.db.patch(lead._id, {
         lastCustomerMessageAt: Date.now(),
+        updatedAt: Date.now(),
       });
     }
   },
@@ -199,6 +221,28 @@ export const markReminderSent = mutation({
     if (lead) {
       await ctx.db.patch(lead._id, {
         reminderSentAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+  },
+});
+
+// Actualizar último mensaje
+export const updateLastMessage = mutation({
+  args: {
+    phone: v.string(),
+    message: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const lead = await ctx.db
+      .query("leads")
+      .withIndex("by_phone", (q) => q.eq("phone", args.phone))
+      .first();
+
+    if (lead) {
+      await ctx.db.patch(lead._id, {
+        lastMessage: args.message,
+        updatedAt: Date.now(),
       });
     }
   },

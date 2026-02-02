@@ -74,6 +74,7 @@ export const getFormattedHistory = query({
     return events.reverse().map((event) => ({
       role: event.direction === "in" ? "user" : "assistant",
       content: event.text,
+      timestamp: event.createdAt,
     }));
   },
 });
@@ -87,6 +88,7 @@ export const save = mutation({
     direction: v.string(), // "in" o "out"
     text: v.string(),
     metadata: v.optional(v.any()),
+    createdAt: v.optional(v.number()), // Para migración desde Supabase
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("events", {
@@ -94,6 +96,7 @@ export const save = mutation({
       direction: args.direction,
       text: args.text,
       metadata: args.metadata,
+      createdAt: args.createdAt ?? Date.now(),
     });
   },
 });
@@ -111,6 +114,7 @@ export const saveIncoming = mutation({
       direction: "in",
       text: args.text,
       metadata: args.metadata,
+      createdAt: Date.now(),
     });
   },
 });
@@ -128,6 +132,7 @@ export const saveOutgoing = mutation({
       direction: "out",
       text: args.text,
       metadata: args.metadata,
+      createdAt: Date.now(),
     });
   },
 });

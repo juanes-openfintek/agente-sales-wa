@@ -790,15 +790,37 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
         if has_image or any(x in text.lower() for x in ["envié", "enviado", "listo", "ya pagué", "ya pague"]):
             update_lead_func(phone, status=ConversationState.PAYMENT_COMPLETED.value)
 
-            # Marcar pedido como pagado en Convex
+            # Registrar pago y enviar email de notificación
             if not is_test:
                 try:
                     order_mgr = get_order_manager(phone)
                     import asyncio
                     loop = asyncio.get_event_loop()
+                    
+                    # Obtener info del pedido para el monto
+                    active_order = loop.run_until_complete(order_mgr.get_or_create_active_order())
+                    order_total = active_order.get("total", 0) or lead_info.get("order_total", 0)
+                    payment_method = lead_info.get("payment_method", "Transferencia")
+                    
+                    # Registrar el pago (esto envía el email automáticamente)
+                    payment_result = loop.run_until_complete(
+                        order_mgr.register_payment(
+                            amount=float(order_total),
+                            payment_method=payment_method,
+                            reference=f"Comprobante recibido via WhatsApp - {text[:100] if text else 'imagen'}",
+                            send_email=True,
+                        )
+                    )
+                    
+                    payment_number = payment_result.get("paymentNumber", 0)
+                    email_sent = payment_result.get("emailSent", False)
+                    print(f"[PAYMENT] Pago #{payment_number} registrado para {phone}. Email enviado: {email_sent}")
+                    
+                    # Marcar pedido como pagado
                     loop.run_until_complete(order_mgr.mark_order_paid())
+                    
                 except Exception as e:
-                    print(f"[OrderManager] Error marcando pedido como pagado: {e}")
+                    print(f"[OrderManager] Error registrando pago: {e}")
 
             reply_text = format_whatsapp_message(format_payment_completed_transfer(schedule_ack))
             action = "transfer_agent"

@@ -9,6 +9,11 @@ import { query, mutation } from "./_generated/server";
 // delivered: Entregado
 // cancelled: Cancelado
 
+// Estados de pago
+// pending: Pendiente de pago
+// partial: Pago parcial recibido
+// completed: Pago completo
+
 // ============ QUERIES ============
 
 // Obtener todos los pedidos de un cliente
@@ -90,12 +95,18 @@ export const getByStatus = query({
 
 // ============ MUTATIONS ============
 
-// Crear nuevo pedido
+// Crear nuevo pedido (compatible con schema actualizado)
 export const create = mutation({
   args: {
     phone: v.string(),
-    items: v.optional(v.string()),
+    items: v.optional(v.any()), // Puede ser string JSON o array
     total: v.optional(v.number()),
+    totalAmount: v.optional(v.number()),
+    discountAmount: v.optional(v.number()),
+    finalAmount: v.optional(v.number()),
+    deliveryAddress: v.optional(v.string()),
+    paymentMethod: v.optional(v.string()),
+    notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Obtener el numero de pedido siguiente
@@ -105,14 +116,34 @@ export const create = mutation({
       .collect();
 
     const orderNumber = existingOrders.length + 1;
+    const now = Date.now();
+
+    // Calcular montos
+    const totalAmount = args.totalAmount ?? args.total ?? 0;
+    const discountAmount = args.discountAmount ?? 0;
+    const finalAmount = args.finalAmount ?? totalAmount - discountAmount;
+
+    // Normalizar items a JSON si es necesario
+    let itemsValue = args.items;
+    if (typeof itemsValue === "object" && itemsValue !== null) {
+      itemsValue = JSON.stringify(itemsValue);
+    }
 
     const orderId = await ctx.db.insert("orders", {
       phone: args.phone,
       orderNumber,
-      items: args.items || "[]",
-      total: args.total || 0,
+      items: itemsValue || "[]",
+      totalAmount,
+      discountAmount,
+      finalAmount,
+      total: finalAmount, // Mantener por compatibilidad
       status: "pending",
-      createdAt: Date.now(),
+      paymentStatus: "pending",
+      deliveryAddress: args.deliveryAddress,
+      paymentMethod: args.paymentMethod,
+      notes: args.notes,
+      createdAt: now,
+      updatedAt: now,
     });
 
     // Actualizar el lead con el pedido activo
@@ -125,6 +156,7 @@ export const create = mutation({
       await ctx.db.patch(lead._id, {
         currentOrderId: orderId,
         totalOrders: orderNumber,
+        updatedAt: now,
       });
     }
 
@@ -136,13 +168,33 @@ export const create = mutation({
 export const updateItems = mutation({
   args: {
     id: v.id("orders"),
-    items: v.string(),
-    total: v.number(),
+    items: v.any(), // Puede ser string o array
+    total: v.optional(v.number()),
+    totalAmount: v.optional(v.number()),
+    discountAmount: v.optional(v.number()),
+    finalAmount: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
+
+    // Normalizar items
+    let itemsValue = args.items;
+    if (typeof itemsValue === "object" && itemsValue !== null) {
+      itemsValue = JSON.stringify(itemsValue);
+    }
+
+    // Calcular montos
+    const totalAmount = args.totalAmount ?? args.total ?? 0;
+    const discountAmount = args.discountAmount ?? 0;
+    const finalAmount = args.finalAmount ?? totalAmount - discountAmount;
+
     await ctx.db.patch(args.id, {
-      items: args.items,
-      total: args.total,
+      items: itemsValue,
+      totalAmount,
+      discountAmount,
+      finalAmount,
+      total: finalAmount, // Mantener por compatibilidad
+      updatedAt: now,
     });
     return args.id;
   },
@@ -165,6 +217,7 @@ export const setDeliveryAddress = mutation({
       deliveryAddress: address,
       deliveryReference: reference,
       deliveryTime: deliveryTime,
+      updatedAt: Date.now(),
     });
 
     return id;
@@ -180,6 +233,7 @@ export const setPaymentMethod = mutation({
   handler: async (ctx, args) => {
     await ctx.db.patch(args.id, {
       paymentMethod: args.paymentMethod,
+      updatedAt: Date.now(),
     });
     return args.id;
   },
@@ -189,9 +243,11 @@ export const setPaymentMethod = mutation({
 export const confirm = mutation({
   args: { id: v.id("orders") },
   handler: async (ctx, args) => {
+    const now = Date.now();
     await ctx.db.patch(args.id, {
       status: "confirmed",
-      confirmedAt: Date.now(),
+      confirmedAt: now,
+      updatedAt: now,
     });
     return args.id;
   },
@@ -201,9 +257,12 @@ export const confirm = mutation({
 export const markPaid = mutation({
   args: { id: v.id("orders") },
   handler: async (ctx, args) => {
+    const now = Date.now();
     await ctx.db.patch(args.id, {
       status: "paid",
-      paidAt: Date.now(),
+      paymentStatus: "completed",
+      paidAt: now,
+      updatedAt: now,
     });
 
     // Limpiar referencia en el lead
@@ -217,6 +276,7 @@ export const markPaid = mutation({
       if (lead && lead.currentOrderId === args.id) {
         await ctx.db.patch(lead._id, {
           currentOrderId: undefined,
+          updatedAt: now,
         });
       }
     }
@@ -225,13 +285,36 @@ export const markPaid = mutation({
   },
 });
 
+// Actualizar estado de pago
+export const updatePaymentStatus = mutation({
+  args: {
+    id: v.id("orders"),
+    paymentStatus: v.string(), // pending, partial, completed
+  },
+  handler: async (ctx, args) => {
+    const updates: Record<string, unknown> = {
+      paymentStatus: args.paymentStatus,
+      updatedAt: Date.now(),
+    };
+
+    if (args.paymentStatus === "completed") {
+      updates.paidAt = Date.now();
+    }
+
+    await ctx.db.patch(args.id, updates);
+    return args.id;
+  },
+});
+
 // Marcar como entregado
 export const markDelivered = mutation({
   args: { id: v.id("orders") },
   handler: async (ctx, args) => {
+    const now = Date.now();
     await ctx.db.patch(args.id, {
       status: "delivered",
-      deliveredAt: Date.now(),
+      deliveredAt: now,
+      updatedAt: now,
     });
     return args.id;
   },
@@ -241,9 +324,11 @@ export const markDelivered = mutation({
 export const cancel = mutation({
   args: { id: v.id("orders") },
   handler: async (ctx, args) => {
+    const now = Date.now();
     await ctx.db.patch(args.id, {
       status: "cancelled",
-      cancelledAt: Date.now(),
+      cancelledAt: now,
+      updatedAt: now,
     });
 
     // Limpiar referencia en el lead
@@ -257,6 +342,7 @@ export const cancel = mutation({
       if (lead && lead.currentOrderId === args.id) {
         await ctx.db.patch(lead._id, {
           currentOrderId: undefined,
+          updatedAt: now,
         });
       }
     }
@@ -272,25 +358,71 @@ export const updateStatus = mutation({
     status: v.string(),
   },
   handler: async (ctx, args) => {
-    const updates: Record<string, unknown> = { status: args.status };
+    const now = Date.now();
+    const updates: Record<string, unknown> = {
+      status: args.status,
+      updatedAt: now,
+    };
 
     // Agregar timestamp segun el estado
     switch (args.status) {
       case "confirmed":
-        updates.confirmedAt = Date.now();
+        updates.confirmedAt = now;
         break;
       case "paid":
-        updates.paidAt = Date.now();
+        updates.paidAt = now;
+        updates.paymentStatus = "completed";
         break;
       case "delivered":
-        updates.deliveredAt = Date.now();
+        updates.deliveredAt = now;
         break;
       case "cancelled":
-        updates.cancelledAt = Date.now();
+        updates.cancelledAt = now;
         break;
     }
 
     await ctx.db.patch(args.id, updates);
+    return args.id;
+  },
+});
+
+// Agregar notas al pedido
+export const addNotes = mutation({
+  args: {
+    id: v.id("orders"),
+    notes: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      notes: args.notes,
+      updatedAt: Date.now(),
+    });
+    return args.id;
+  },
+});
+
+// Aplicar descuento
+export const applyDiscount = mutation({
+  args: {
+    id: v.id("orders"),
+    discountAmount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const order = await ctx.db.get(args.id);
+    if (!order) {
+      throw new Error("Order not found");
+    }
+
+    const totalAmount = order.totalAmount;
+    const finalAmount = totalAmount - args.discountAmount;
+
+    await ctx.db.patch(args.id, {
+      discountAmount: args.discountAmount,
+      finalAmount: finalAmount,
+      total: finalAmount, // Mantener por compatibilidad
+      updatedAt: Date.now(),
+    });
+
     return args.id;
   },
 });
