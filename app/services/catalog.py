@@ -1,53 +1,82 @@
 import json
+import os
 from typing import Any
 
-from app.config import supabase, SEPARATOR, FREE_ITEM_LABEL
+from convex import ConvexClient
+
+from app.config import SEPARATOR, FREE_ITEM_LABEL
+
+# ============================================================
+# SINGLETON DE CONVEX CLIENT (compartido con lead.py)
+# ============================================================
+
+_convex_client: ConvexClient | None = None
+
+
+def _get_convex() -> ConvexClient | None:
+    """Obtiene el cliente de Convex (singleton)."""
+    global _convex_client
+    if _convex_client is None:
+        convex_url = os.getenv("CONVEX_URL")
+        if convex_url:
+            _convex_client = ConvexClient(convex_url)
+    return _convex_client
 
 
 def get_productos_individuales() -> list[dict[str, Any]]:
     """Obtiene todos los productos individuales del inventario."""
-    if not supabase:
+    convex = _get_convex()
+    if not convex:
         return []
     try:
-        response = supabase.table("inventario_comidas_rapidas").select("*").execute()
-        return response.data
-    except Exception as e:  # pragma: no cover - log de conexión
+        return convex.query("catalog:getAllProducts", {})
+    except Exception as e:
         print(f"[ERROR] Error obteniendo productos: {e}")
         return []
 
 
 def get_combos_completos() -> list[dict[str, Any]]:
     """Obtiene todos los combos con sus items incluyendo información de gratis."""
-    if not supabase:
+    convex = _get_convex()
+    if not convex:
         return []
     try:
-        combos_response = supabase.table("combos").select("*").execute()
-        combos = combos_response.data
+        catalog = convex.query("catalog:getFullCatalog", {})
+        combos = catalog.get("combos", [])
 
+        # Adaptar formato para compatibilidad con el resto del código
         for combo in combos:
-            items_response = (
-                supabase.table("combo_items").select("*").eq("combo_key", combo["combo_key"]).execute()
-            )
-            items = items_response.data
+            items = combo.get("items", [])
+
+            # Normalizar campo names (Convex usa camelCase)
             for item in items:
-                item["is_free"] = item.get("is_free", False)
+                # Asegurar que is_free existe (Convex usa isFree)
+                item["is_free"] = item.get("isFree", item.get("is_free", False))
+                # Asegurar que item_name existe (Convex usa itemName)
+                if "itemName" in item and "item_name" not in item:
+                    item["item_name"] = item["itemName"]
 
             combo["items"] = items
 
+            # Generar formatted_items (igual que antes)
             items_with_price = []
             total_price = combo.get("precio", 0)
 
             for item in items:
                 if item.get("is_free", False):
-                    items_with_price.append(f"🎁 {item.get('item_name', '')} - {FREE_ITEM_LABEL}")
+                    items_with_price.append(f"🎁 {item.get('item_name', item.get('itemName', ''))} - {FREE_ITEM_LABEL}")
                 else:
-                    items_with_price.append(f"{item.get('item_name', '')}")
+                    items_with_price.append(f"{item.get('item_name', item.get('itemName', ''))}")
 
             combo["formatted_items"] = items_with_price
             combo["total_price"] = total_price
 
+            # Normalizar combo_key (Convex usa comboKey)
+            if "comboKey" in combo and "combo_key" not in combo:
+                combo["combo_key"] = combo["comboKey"]
+
         return combos
-    except Exception as e:  # pragma: no cover - log de conexión
+    except Exception as e:
         print(f"[ERROR] Error obteniendo combos: {e}")
         return []
 

@@ -92,17 +92,15 @@ SCHEDULER_CHECK_INTERVAL_SECONDS: Final[int] = 60
 # ============================================================
 VALID_CITIES: list[str] = ["bogota", "bogotá", "cali"]
 
-# Inicializar cliente de Supabase
+# Inicializar cliente de Supabase (opcional - solo para migración)
 supabase: Client | None = None
 if SUPABASE_URL and SUPABASE_KEY:
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        print("[OK] Supabase conectado correctamente")
+        print("[OK] Supabase conectado (modo legacy/migración)")
     except Exception as e:  # pragma: no cover - solo logueo
-        print(f"[ERROR] No se pudo conectar a Supabase: {e}")
+        print(f"[WARNING] No se pudo conectar a Supabase: {e}")
         supabase = None
-else:
-    print("[WARNING] SUPABASE_URL o SUPABASE_KEY no encontradas en .env")
 
 # Configurar Gemini
 if GEMINI_API_KEY:

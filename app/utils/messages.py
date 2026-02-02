@@ -314,3 +314,76 @@ def format_notify_preference_saved(preference: str) -> str:
         f"¡Perfecto! Anotado: te avisaremos *{preference}* para tu próximo pedido. 📝\n\n"
         "¡Fue un placer atenderte! Si necesitas algo más, aquí estaremos. 🥩"
     )
+
+
+# ============================================================
+# MENSAJES DE DIRECCIONES
+# ============================================================
+
+def format_address_selection_prompt(addresses: list[dict], primary_address: dict | None) -> str:
+    """
+    Mensaje para seleccionar direccion de entrega cuando hay direcciones guardadas.
+    """
+    if not addresses:
+        return ""
+
+    lines = ["Veo que tienes direcciones guardadas:\n"]
+
+    for i, addr in enumerate(addresses, 1):
+        label = addr.get("label", "")
+        address_text = addr.get("address", "")
+        is_primary = addr.get("is_primary", False)
+
+        marker = "⭐" if is_primary else f"{i}."
+        label_text = f" *({label})*" if label else ""
+        lines.append(f"{marker} {address_text}{label_text}")
+
+    lines.append("")
+    lines.append("¿A cuál dirección enviamos tu pedido?")
+    lines.append("")
+    lines.append("Responde con el *número* de la dirección")
+    lines.append("o escribe *nueva* para agregar otra.")
+
+    return "\n".join(lines)
+
+
+def format_address_saved(label: str | None = None) -> str:
+    """
+    Mensaje cuando se guarda una nueva direccion.
+    """
+    label_text = f" como *{label}*" if label else ""
+    return f"¡Dirección guardada{label_text}! 📍"
+
+
+def format_address_selected(address: str) -> str:
+    """
+    Mensaje confirmando la direccion seleccionada.
+    """
+    return f"Perfecto, enviaremos a:\n📍 {address}"
+
+
+def format_ask_address_label() -> str:
+    """
+    Mensaje para pedir etiqueta de direccion (opcional).
+    """
+    return (
+        "¿Quieres ponerle un nombre a esta dirección?\n\n"
+        "Por ejemplo: *Casa*, *Trabajo*, *Oficina*\n\n"
+        "Responde con el nombre o escribe *no* para omitir."
+    )
+
+
+def format_returning_customer_greeting(name: str, primary_address: str | None = None) -> str:
+    """
+    Saludo para cliente que regresa con direccion guardada.
+    """
+    if primary_address:
+        return (
+            f"¡Hola de nuevo, {name}! 👋\n\n"
+            f"Tu dirección principal es:\n📍 {primary_address}\n\n"
+            "¿Qué te gustaría ordenar hoy?"
+        )
+    return (
+        f"¡Hola de nuevo, {name}! 👋\n\n"
+        "¿Qué te gustaría ordenar hoy?"
+    )

@@ -11,11 +11,11 @@ from app.config import (
     ConversationState,
     PAYMENT_METHODS,
     SEPARATOR,
-    supabase,
 )
 from app.services.ai import extract_name_with_ai, format_whatsapp_message, generate_gemini_response
 from app.services.catalog import generate_order_summary
 from app.services.lead import (
+    count_incoming_messages,
     get_history,
     get_lead_info,
     get_test_history,
@@ -28,6 +28,7 @@ from app.services.lead import (
     update_test_lead_info,
 )
 from app.services.whatsapp import send_whatsapp
+from app.services.order_manager import get_order_manager
 from app.utils.validation import (
     validate_email,
     validate_name,
@@ -64,6 +65,9 @@ from app.utils.messages import (
     format_name_with_order_intent,
     format_modification_prompt,
     format_notify_preference_saved,
+    format_address_selection_prompt,
+    format_address_selected,
+    format_returning_customer_greeting,
 )
 
 
@@ -442,20 +446,7 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                 if e["direction"] == "in"
             ])
         else:
-            if supabase:
-                try:
-                    res = (
-                        supabase.table("events")
-                        .select("id", count="exact")
-                        .eq("phone", phone)
-                        .eq("direction", "in")
-                        .execute()
-                    )
-                    message_count = res.count or 0
-                except Exception:
-                    message_count = 0
-            else:
-                message_count = 0
+            message_count = count_incoming_messages(phone)
 
         if message_count <= 1:
             # Primer mensaje - enviar bienvenida
@@ -508,7 +499,18 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                 # Convertir a JSON si es lista
                 import json
                 order_items_json = json.dumps(order_items, ensure_ascii=False) if isinstance(order_items, list) else order_items
+
+                # Guardar en lead (compatibilidad) Y crear/actualizar order en Convex
                 update_lead_func(phone, order_items=order_items_json, order_total=order_total)
+
+                # Crear order en la nueva tabla si no es test
+                if not is_test:
+                    try:
+                        order_mgr = get_order_manager(phone)
+                        import asyncio
+                        asyncio.create_task(order_mgr.update_order_items(order_items, order_total))
+                    except Exception as e:
+                        print(f"[OrderManager] Error creando order: {e}")
 
             if has_delivery_info(lead_info):
                 # Tiene todos los datos - ir a confirmar
@@ -520,23 +522,86 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                 # Faltan datos - ir a collecting_delivery_info
                 update_lead_func(phone, status=ConversationState.COLLECTING_DELIVERY_INFO.value)
 
-                # Usar función centralizada para mostrar campos faltantes
-                missing, prompt = format_missing_fields_prompt(lead_info)
-                ack = "Perfecto, tomé tu pedido."
-                reply_text = format_whatsapp_message(f"{ack}\n\n{prompt}")
+                # Verificar si tiene direcciones guardadas (solo para usuarios reales)
+                address_prompt = ""
+                if not is_test:
+                    try:
+                        order_mgr = get_order_manager(phone)
+                        import asyncio
+                        addresses = asyncio.get_event_loop().run_until_complete(order_mgr.get_addresses())
+                        if addresses:
+                            primary = next((a for a in addresses if a.get("is_primary")), None)
+                            address_prompt = format_address_selection_prompt(addresses, primary)
+                    except Exception as e:
+                        print(f"[OrderManager] Error obteniendo direcciones: {e}")
+
+                if address_prompt:
+                    ack = "Perfecto, tome tu pedido."
+                    reply_text = format_whatsapp_message(f"{ack}\n\n{address_prompt}")
+                else:
+                    # Sin direcciones guardadas - pedir datos normalmente
+                    missing, prompt = format_missing_fields_prompt(lead_info)
+                    ack = "Perfecto, tomé tu pedido."
+                    reply_text = format_whatsapp_message(f"{ack}\n\n{prompt}")
 
     # ============================================================
     # ESTADO: COLLECTING_DELIVERY_INFO (Recolectando datos de envío)
     # ============================================================
     elif current_state == ConversationState.COLLECTING_DELIVERY_INFO.value:
+        # Verificar si el usuario está seleccionando una dirección guardada
+        address_selected_from_list = False
+        text_stripped = text.strip().lower()
+
+        # Solo verificar selección de dirección si no es test
+        if not is_test and (text_stripped.isdigit() or text_stripped == "nueva"):
+            try:
+                order_mgr = get_order_manager(phone)
+                import asyncio
+                loop = asyncio.get_event_loop()
+                addresses = loop.run_until_complete(order_mgr.get_addresses())
+
+                if addresses and text_stripped.isdigit():
+                    idx = int(text_stripped) - 1
+                    if 0 <= idx < len(addresses):
+                        selected_addr = addresses[idx]
+                        addr_text = selected_addr.get("address", "")
+                        addr_ref = selected_addr.get("reference", "")
+                        addr_id = selected_addr.get("_id")
+
+                        # Guardar dirección en el pedido actual
+                        loop.run_until_complete(order_mgr.set_order_delivery_address(
+                            address=addr_text,
+                            reference=addr_ref,
+                            address_id=addr_id,
+                            delivery_time="24 horas"
+                        ))
+
+                        # Actualizar lead también (compatibilidad)
+                        update_lead_func(phone, address=addr_text)
+                        lead_info["address"] = addr_text
+
+                        reply_text = format_whatsapp_message(format_address_selected(addr_text))
+                        address_selected_from_list = True
+
+                elif text_stripped == "nueva":
+                    # El usuario quiere agregar nueva dirección
+                    missing, prompt = format_missing_fields_prompt(lead_info)
+                    reply_text = format_whatsapp_message(
+                        "Perfecto, escribe tu nueva dirección.\n\n" + prompt
+                    )
+                    address_selected_from_list = True  # Evitar procesamiento normal
+
+            except Exception as e:
+                print(f"[OrderManager] Error seleccionando dirección: {e}")
+
         if has_delivery_info(lead_info):
             # Ya tiene todos los datos - ir a confirmar
             update_lead_func(phone, status=ConversationState.CONFIRMING_ORDER.value)
             order_summary = generate_order_summary(phone)
             reply_text = format_whatsapp_message(format_order_confirmation(order_summary))
             current_state = ConversationState.CONFIRMING_ORDER.value
-        else:
-            # Intentar extraer datos del mensaje
+        elif not address_selected_from_list:
+            # Intentar extraer datos del mensaje (flujo normal)
             merged_info = merge_delivery_info(text, lead_info)
             apply_delivery_updates(phone, merged_info, lead_info, update_lead_func)
 
@@ -549,7 +614,7 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                     reply_text = format_whatsapp_message(format_city_not_available(lead_info["city"]))
                     update_lead_func(phone, city=lead_info["city"], status=ConversationState.BROWSING.value)
                 else:
-                    # Todo correcto - guardar y confirmar
+                    # Todo correcto - guardar dirección y confirmar
                     update_lead_func(
                         phone,
                         city=lead_info["city"],
@@ -558,6 +623,26 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
                         delivery_time="24 horas",
                         status=ConversationState.CONFIRMING_ORDER.value,
                     )
+
+                    # Guardar dirección en la nueva tabla para futuros pedidos
+                    if not is_test:
+                        try:
+                            order_mgr = get_order_manager(phone)
+                            import asyncio
+                            loop = asyncio.get_event_loop()
+                            # Crear dirección si es nueva
+                            loop.run_until_complete(order_mgr.add_address(
+                                address=lead_info["address"],
+                                is_primary=True  # Primera dirección es principal
+                            ))
+                            # Actualizar pedido con la dirección
+                            loop.run_until_complete(order_mgr.set_order_delivery_address(
+                                address=lead_info["address"],
+                                delivery_time="24 horas"
+                            ))
+                        except Exception as e:
+                            print(f"[OrderManager] Error guardando dirección: {e}")
+
                     order_summary = generate_order_summary(phone)
                     reply_text = format_whatsapp_message(format_order_confirmation(order_summary))
             else:
@@ -648,12 +733,33 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
         if not payment_method:
             reply_text = format_whatsapp_message(format_payment_methods())
         else:
+            # Actualizar método de pago en el pedido (Convex)
+            if not is_test:
+                try:
+                    order_mgr = get_order_manager(phone)
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(order_mgr.set_order_payment_method(payment_method))
+                except Exception as e:
+                    print(f"[OrderManager] Error guardando método de pago: {e}")
+
             if payment_method == "Contra entrega":
                 update_lead_func(
                     phone,
                     payment_method=payment_method,
                     status=ConversationState.PAYMENT_COMPLETED.value
                 )
+
+                # Confirmar pedido (no marcar como pagado aún - se paga al entregar)
+                if not is_test:
+                    try:
+                        order_mgr = get_order_manager(phone)
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        loop.run_until_complete(order_mgr.confirm_order())
+                    except Exception as e:
+                        print(f"[OrderManager] Error confirmando pedido: {e}")
+
                 reply_text = format_whatsapp_message(format_payment_completed_cash())
                 action = "transfer_agent"
             else:
@@ -683,6 +789,17 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
         # Verificar si envió comprobante
         if has_image or any(x in text.lower() for x in ["envié", "enviado", "listo", "ya pagué", "ya pague"]):
             update_lead_func(phone, status=ConversationState.PAYMENT_COMPLETED.value)
+
+            # Marcar pedido como pagado en Convex
+            if not is_test:
+                try:
+                    order_mgr = get_order_manager(phone)
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(order_mgr.mark_order_paid())
+                except Exception as e:
+                    print(f"[OrderManager] Error marcando pedido como pagado: {e}")
+
             reply_text = format_whatsapp_message(format_payment_completed_transfer(schedule_ack))
             action = "transfer_agent"
         else:
@@ -697,26 +814,35 @@ async def handle_webhook(raw: dict[str, Any], event_type: str | None = None) -> 
     elif current_state == ConversationState.PAYMENT_COMPLETED.value:
         # Verificar si quiere hacer un nuevo pedido
         if is_new_order_request(text):
-            # Reiniciar para nuevo pedido pero mantener nombre y datos de contacto
-            name = lead_info.get("name")
-            contact_phone = lead_info.get("contact_phone")
-
-            # Limpiar datos del pedido anterior pero mantener info del cliente
+            # Mantener nombre, datos de contacto y datos de envío guardados
+            # Solo limpiar los datos del pedido actual
             update_lead_func(
                 phone,
                 status=ConversationState.BROWSING.value,
-                cedula=None,
-                address=None,
-                city=None,
-                email=None,
-                delivery_time=None,
                 payment_method=None,
                 order_items=None,
                 order_total=None,
                 completed_message_sent=None,  # Resetear para nuevo pedido
             )
 
-            reply_text = format_whatsapp_message(format_new_order_prompt())
+            # Si tiene direcciones guardadas, mostrar saludo personalizado
+            greeting = format_new_order_prompt()
+            if not is_test:
+                try:
+                    order_mgr = get_order_manager(phone)
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    primary_addr = loop.run_until_complete(order_mgr.get_primary_address())
+                    if primary_addr:
+                        name = lead_info.get("name", "")
+                        greeting = format_returning_customer_greeting(
+                            name,
+                            primary_addr.get("address")
+                        )
+                except Exception as e:
+                    print(f"[OrderManager] Error obteniendo dirección principal: {e}")
+
+            reply_text = format_whatsapp_message(greeting)
         else:
             # Verificar si está respondiendo a la pregunta de cuándo quiere el próximo pedido
             notify_pref = extract_notify_preference(text)

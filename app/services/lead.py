@@ -1,10 +1,96 @@
+import os
 from datetime import datetime
 from typing import Any
 
-from app.config import supabase, ConversationState
+from convex import ConvexClient
+
+from app.config import ConversationState
 
 # Almacenamiento temporal para conversaciones de prueba
 test_conversations: dict[str, dict[str, Any]] = {}
+
+# ============================================================
+# SINGLETON DE CONVEX CLIENT
+# ============================================================
+
+_convex_client: ConvexClient | None = None
+
+
+def _get_convex() -> ConvexClient | None:
+    """Obtiene el cliente de Convex (singleton)."""
+    global _convex_client
+    if _convex_client is None:
+        convex_url = os.getenv("CONVEX_URL")
+        if convex_url:
+            _convex_client = ConvexClient(convex_url)
+            print(f"[OK] Convex conectado en lead.py: {convex_url}")
+    return _convex_client
+
+
+# Mapeo snake_case → camelCase para campos de lead
+_FIELD_MAP: dict[str, str] = {
+    "name": "name",
+    "contact_phone": "contactPhone",
+    "email": "email",
+    "address": "address",
+    "age": "age",
+    "cedula": "cedula",
+    "city": "city",
+    "delivery_time": "deliveryTime",
+    "status": "status",
+    "payment_method": "paymentMethod",
+    "order_items": "orderItems",
+    "order_total": "orderTotal",
+    "notify_preference": "notifyPreference",
+    "completed_message_sent": "completedMessageSent",
+}
+
+# Mapeo inverso camelCase → snake_case
+_FIELD_MAP_REVERSE: dict[str, str] = {v: k for k, v in _FIELD_MAP.items()}
+# Campos extra de Convex que necesitamos mapear
+_FIELD_MAP_REVERSE.update({
+    "lastCustomerMessageAt": "last_customer_message_at",
+    "reminderSentAt": "reminder_sent_at",
+    "totalOrders": "total_orders",
+    "currentOrderId": "current_order_id",
+})
+
+
+def _to_camel_case(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Convierte kwargs snake_case a camelCase, filtrando None."""
+    result = {}
+    for key, value in kwargs.items():
+        if value is None:
+            continue  # No enviar None a Convex (v.optional no acepta null)
+        camel_key = _FIELD_MAP.get(key, key)
+        result[camel_key] = value
+    return result
+
+
+def _normalize_lead(lead: dict[str, Any]) -> dict[str, Any]:
+    """Convierte un lead de Convex (camelCase) a snake_case."""
+    result = _get_default_lead_info()
+
+    for convex_key, value in lead.items():
+        if convex_key.startswith("_"):
+            continue  # Ignorar _id, _creationTime
+        snake_key = _FIELD_MAP_REVERSE.get(convex_key, convex_key)
+
+        # Convertir timestamps epoch ms → ISO string
+        if snake_key in ("last_customer_message_at", "reminder_sent_at") and isinstance(value, (int, float)):
+            try:
+                result[snake_key] = datetime.fromtimestamp(value / 1000).isoformat()
+            except (ValueError, OSError):
+                result[snake_key] = None
+        elif snake_key in result:
+            result[snake_key] = value
+
+    return result
+
+
+# ============================================================
+# FUNCIONES DE TEST (sin cambios - siguen usando dict en memoria)
+# ============================================================
 
 
 def is_test_phone(phone: str) -> bool:
@@ -135,6 +221,11 @@ def list_test_conversations() -> dict[str, Any]:
     }
 
 
+# ============================================================
+# FUNCIONES DE PRODUCCIÓN (ahora usan Convex)
+# ============================================================
+
+
 def _get_default_lead_info() -> dict[str, Any]:
     """Retorna estructura por defecto de lead info."""
     return {
@@ -149,8 +240,8 @@ def _get_default_lead_info() -> dict[str, Any]:
         "status": ConversationState.COLLECTING_INFO.value,
         "payment_method": None,
         # Campos del pedido actual
-        "order_items": None,  # JSON string con items del pedido
-        "order_total": None,  # Total del pedido
+        "order_items": None,
+        "order_total": None,
         # Campos de tracking de inactividad
         "last_customer_message_at": None,
         "reminder_sent_at": None,
@@ -162,148 +253,124 @@ def _get_default_lead_info() -> dict[str, Any]:
 
 
 def get_lead_info(phone: str) -> dict[str, Any]:
-    """Obtiene información del lead desde Supabase."""
-    if not supabase:
+    """Obtiene información del lead desde Convex."""
+    convex = _get_convex()
+    if not convex:
         return _get_default_lead_info()
 
     try:
-        response = supabase.table("leads").select("*").eq("phone", phone).execute()
-        if response.data and len(response.data) > 0:
-            lead = response.data[0]
-            return {
-                "name": lead.get("name"),
-                "contact_phone": lead.get("contact_phone"),
-                "email": lead.get("email"),
-                "address": lead.get("address"),
-                "age": lead.get("age"),
-                "cedula": lead.get("cedula"),
-                "city": lead.get("city"),
-                "delivery_time": lead.get("delivery_time"),
-                "status": lead.get("status", ConversationState.COLLECTING_INFO.value),
-                "payment_method": lead.get("payment_method"),
-                # Campos del pedido actual
-                "order_items": lead.get("order_items"),
-                "order_total": lead.get("order_total"),
-                # Campos de tracking de inactividad
-                "last_customer_message_at": lead.get("last_customer_message_at"),
-                "reminder_sent_at": lead.get("reminder_sent_at"),
-                # Campo para preferencia de aviso
-                "notify_preference": lead.get("notify_preference"),
-                # Campo para evitar respuestas repetitivas en estado completado
-                "completed_message_sent": lead.get("completed_message_sent"),
-            }
+        result = convex.query("leads:getByPhone", {"phone": phone})
+        if result:
+            return _normalize_lead(result)
         return _get_default_lead_info()
-    except Exception as e:  # pragma: no cover - log de conexión
+    except Exception as e:
         print(f"[ERROR] Error obteniendo lead: {e}")
         return _get_default_lead_info()
 
 
 def update_lead_info(phone: str, **kwargs: Any) -> None:
-    """Actualiza información del lead en Supabase."""
-    if not supabase:
+    """Actualiza información del lead en Convex."""
+    convex = _get_convex()
+    if not convex:
         return
 
     try:
-        existing = supabase.table("leads").select("id").eq("phone", phone).execute()
+        data = _to_camel_case(kwargs)
+        data["phone"] = phone
 
-        data = {"phone": phone, "updated_at": datetime.now().isoformat()}
-        data.update(kwargs)
-
-        if existing.data and len(existing.data) > 0:
-            supabase.table("leads").update(data).eq("phone", phone).execute()
-        else:
-            data["status"] = kwargs.get("status", "new")
-            supabase.table("leads").insert(data).execute()
+        convex.mutation("leads:upsert", data)
 
         print(f"[DEBUG] Lead actualizado: {phone} - {kwargs}")
-    except Exception as e:  # pragma: no cover - log de conexión
+    except Exception as e:
         print(f"[ERROR] Error actualizando lead: {e}")
 
 
 def save_event(phone: str, direction: str, text: str, metadata: dict[str, Any] | None = None) -> None:
-    """Guarda un evento/mensaje en Supabase."""
-    if not supabase:
+    """Guarda un evento/mensaje en Convex."""
+    convex = _get_convex()
+    if not convex:
         return
 
     try:
-        existing = supabase.table("leads").select("id").eq("phone", phone).execute()
-        if not existing.data or len(existing.data) == 0:
-            supabase.table("leads").insert(
-                {
-                    "phone": phone,
-                    "status": "new",
-                    "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
-                }
-            ).execute()
-            print(f"[DEBUG] Lead creado automáticamente para {phone}")
-
-        # Si es mensaje entrante, actualizar tracking de inactividad
-        if direction == "in":
-            update_lead_info(
-                phone,
-                last_customer_message_at=datetime.now().isoformat(),
-                reminder_sent_at=None  # Limpiar reminder al recibir respuesta
-            )
-
-        data = {
+        event_data: dict[str, Any] = {
             "phone": phone,
             "direction": direction,
             "text": text,
-            "created_at": datetime.now().isoformat(),
         }
         if metadata:
-            data["metadata"] = metadata
+            event_data["metadata"] = metadata
 
-        supabase.table("events").insert(data).execute()
-    except Exception as e:  # pragma: no cover - log de conexión
+        convex.mutation("events:save", event_data)
+
+        # Si es mensaje entrante, actualizar tracking de inactividad
+        if direction == "in":
+            try:
+                convex.mutation("leads:updateLastMessageTime", {"phone": phone})
+            except Exception:
+                pass  # No fallar si el lead aún no existe
+
+    except Exception as e:
         print(f"[ERROR] Error guardando evento: {e}")
 
 
 def get_history(phone: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Obtiene el historial de conversación desde Supabase."""
-    if not supabase:
+    """Obtiene el historial de conversación desde Convex."""
+    convex = _get_convex()
+    if not convex:
         return []
 
     try:
-        response = (
-            supabase.table("events")
-            .select("direction, text")
-            .eq("phone", phone)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
+        events = convex.query("events:getHistory", {"phone": phone, "limit": limit})
 
+        # Convertir al formato que espera Gemini: {role: "user"|"model", parts: [text]}
         history: list[dict[str, Any]] = []
-        for event in reversed(response.data):
-            role = "user" if event["direction"] == "in" else "model"
-            history.append({"role": role, "parts": [event["text"]]})
+        for event in events:
+            role = "user" if event.get("direction") == "in" else "model"
+            history.append({"role": role, "parts": [event.get("text", "")]})
 
         return history
-    except Exception as e:  # pragma: no cover - log de conexión
+    except Exception as e:
         print(f"[ERROR] Error obteniendo historial: {e}")
         return []
 
 
 def get_event_log(phone: str, limit: int = 100) -> list[dict[str, Any]]:
     """Devuelve eventos crudos (incluye timestamps/metadata) para rehidratar chats en front."""
-    if not supabase:
+    convex = _get_convex()
+    if not convex:
         return []
 
     try:
-        response = (
-            supabase.table("events")
-            .select("direction, text, created_at, metadata")
-            .eq("phone", phone)
-            .order("created_at", desc=False)
-            .limit(limit)
-            .execute()
+        events = convex.query(
+            "events:getEventsWithMetadata",
+            {"phone": phone, "limit": limit},
         )
-        return response.data
-    except Exception as e:  # pragma: no cover - log de conexión
+        # Normalizar a snake_case para compatibilidad
+        return [
+            {
+                "direction": e.get("direction"),
+                "text": e.get("text"),
+                "created_at": e.get("_creationTime"),
+                "metadata": e.get("metadata"),
+            }
+            for e in events
+        ]
+    except Exception as e:
         print(f"[ERROR] Error obteniendo eventos: {e}")
         return []
+
+
+def count_incoming_messages(phone: str) -> int:
+    """Cuenta los mensajes entrantes de un teléfono."""
+    convex = _get_convex()
+    if not convex:
+        return 0
+
+    try:
+        return convex.query("events:countIncomingMessages", {"phone": phone})
+    except Exception as e:
+        print(f"[ERROR] Error contando mensajes: {e}")
+        return 0
 
 
 # ============================================================
@@ -328,42 +395,40 @@ def get_all_active_conversations() -> list[dict[str, Any]]:
                 "reminder_sent_at": data.get("reminder_sent_at"),
             })
 
-    # Luego agregar de Supabase
-    if supabase:
+    # Luego agregar de Convex
+    convex = _get_convex()
+    if convex:
         try:
-            # Intentar con las columnas nuevas primero
-            response = (
-                supabase.table("leads")
-                .select("phone, name, status, last_customer_message_at, reminder_sent_at")
-                .neq("status", ConversationState.PAYMENT_COMPLETED.value)
-                .execute()
-            )
-            for lead in response.data:
+            results = convex.query("leads:getActiveConversations", {})
+            for lead in results:
+                phone = lead.get("phone", "")
                 # No duplicar si ya está en test_conversations
-                if lead["phone"] not in test_conversations:
-                    active.append(lead)
+                if phone not in test_conversations:
+                    # Convertir timestamps epoch ms → ISO string
+                    last_msg = lead.get("lastCustomerMessageAt")
+                    reminder = lead.get("reminderSentAt")
+
+                    if isinstance(last_msg, (int, float)):
+                        try:
+                            last_msg = datetime.fromtimestamp(last_msg / 1000).isoformat()
+                        except (ValueError, OSError):
+                            last_msg = None
+
+                    if isinstance(reminder, (int, float)):
+                        try:
+                            reminder = datetime.fromtimestamp(reminder / 1000).isoformat()
+                        except (ValueError, OSError):
+                            reminder = None
+
+                    active.append({
+                        "phone": phone,
+                        "name": lead.get("name"),
+                        "status": lead.get("status"),
+                        "last_customer_message_at": last_msg,
+                        "reminder_sent_at": reminder,
+                    })
         except Exception as e:
-            # Si las columnas no existen, usar updated_at como fallback
-            print(f"[WARNING] Columnas de inactividad no existen, usando updated_at: {e}")
-            try:
-                response = (
-                    supabase.table("leads")
-                    .select("phone, name, status, updated_at")
-                    .neq("status", ConversationState.PAYMENT_COMPLETED.value)
-                    .execute()
-                )
-                for lead in response.data:
-                    if lead["phone"] not in test_conversations:
-                        # Usar updated_at como fallback para last_customer_message_at
-                        active.append({
-                            "phone": lead["phone"],
-                            "name": lead.get("name"),
-                            "status": lead.get("status"),
-                            "last_customer_message_at": lead.get("updated_at"),
-                            "reminder_sent_at": None,
-                        })
-            except Exception as e2:
-                print(f"[ERROR] Error obteniendo conversaciones activas: {e2}")
+            print(f"[ERROR] Error obteniendo conversaciones activas: {e}")
 
     return active
 
@@ -377,5 +442,10 @@ def mark_reminder_sent(phone: str) -> None:
             test_conversations[phone]["reminder_sent_at"] = now
             print(f"[TEST] Reminder marcado para {phone}")
     else:
-        update_lead_info(phone, reminder_sent_at=now)
-        print(f"[DEBUG] Reminder marcado para {phone}")
+        convex = _get_convex()
+        if convex:
+            try:
+                convex.mutation("leads:markReminderSent", {"phone": phone})
+                print(f"[DEBUG] Reminder marcado para {phone}")
+            except Exception as e:
+                print(f"[ERROR] Error marcando reminder: {e}")

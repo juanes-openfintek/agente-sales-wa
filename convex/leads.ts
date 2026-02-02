@@ -62,12 +62,15 @@ export const create = mutation({
     orderItems: v.optional(v.string()),
     orderTotal: v.optional(v.number()),
     notifyPreference: v.optional(v.string()),
+    totalOrders: v.optional(v.number()),
+    completedMessageSent: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
     return await ctx.db.insert("leads", {
       ...args,
       lastCustomerMessageAt: now,
+      totalOrders: args.totalOrders ?? 0,
     });
   },
 });
@@ -91,6 +94,8 @@ export const update = mutation({
     lastCustomerMessageAt: v.optional(v.number()),
     reminderSentAt: v.optional(v.number()),
     notifyPreference: v.optional(v.string()),
+    totalOrders: v.optional(v.number()),
+    completedMessageSent: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { phone, ...updates } = args;
@@ -134,6 +139,8 @@ export const upsert = mutation({
     lastCustomerMessageAt: v.optional(v.number()),
     reminderSentAt: v.optional(v.number()),
     notifyPreference: v.optional(v.string()),
+    totalOrders: v.optional(v.number()),
+    completedMessageSent: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { phone, ...data } = args;
