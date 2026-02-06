@@ -1,0 +1,14 @@
+# Configuración de Nixpacks para Railway
+# Especifica Node 20 porque Baileys lo requiere
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"

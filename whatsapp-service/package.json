@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Servicio WhatsApp con Baileys para agente de ventas",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
