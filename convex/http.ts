@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const http = httpRouter();
 
@@ -184,6 +184,135 @@ http.route({
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+  }),
+});
+
+// ============ WHATSAPP WEBHOOK - STATE MACHINE ============
+
+// POST /webhook/message - Procesar mensaje de WhatsApp (nuevo endpoint directo)
+http.route({
+  path: "/webhook/message",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const body = await request.json();
+      const { phone, text, hasImage, pushName } = body;
+
+      if (!phone) {
+        return new Response(JSON.stringify({ error: "phone is required" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Llamar al state machine
+      const result = await ctx.runAction(
+        internal.conversation.handleMessage.processMessage,
+        {
+          phone,
+          text: text || "",
+          hasImage: hasImage || false,
+          pushName: pushName || null,
+        }
+      );
+
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      console.error("Error processing message:", error);
+      return new Response(
+        JSON.stringify({ error: "Internal server error", details: String(error) }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+  }),
+});
+
+// POST /webhook - Compatibilidad con formato Evolution API (legacy)
+http.route({
+  path: "/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const raw = await request.json();
+
+      // Validar evento
+      const event = raw.event;
+      if (event && event !== "messages.upsert") {
+        return new Response(JSON.stringify({ ok: true, ignored: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Extraer datos del mensaje (formato Evolution API)
+      const data = Array.isArray(raw.data) ? raw.data[0] : raw.data;
+      if (!data) {
+        return new Response(JSON.stringify({ ok: true, ignored: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const keyObj = data.key || {};
+      if (keyObj.fromMe) {
+        return new Response(JSON.stringify({ ok: true, ignored: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Extraer teléfono
+      const remoteJid = keyObj.remoteJid || "";
+      const phone = remoteJid.replace("@s.whatsapp.net", "").replace("@c.us", "");
+
+      // Extraer mensaje
+      const msgObj = data.message || {};
+      const text =
+        msgObj.conversation ||
+        msgObj.extendedTextMessage?.text ||
+        msgObj.imageMessage?.caption ||
+        "";
+      const hasImage = !!msgObj.imageMessage;
+      const pushName = data.pushName || null;
+
+      if (!phone || (!text && !hasImage)) {
+        return new Response(JSON.stringify({ ok: true, ignored: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Llamar al state machine
+      const result = await ctx.runAction(
+        internal.conversation.handleMessage.processMessage,
+        {
+          phone,
+          text,
+          hasImage,
+          pushName,
+        }
+      );
+
+      return new Response(JSON.stringify({ ok: true, ...result }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      console.error("Error processing webhook:", error);
+      return new Response(
+        JSON.stringify({ ok: false, error: String(error) }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
     }
   }),
 });

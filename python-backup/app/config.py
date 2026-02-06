@@ -12,7 +12,7 @@ if not os.getenv("GEMINI_API_KEY"):
     load_dotenv("../.env")
 
 # Configuración externa
-EVOLUTION_URL = os.getenv("EVOLUTION_URL", "http://localhost:8080")
+EVOLUTION_URL = os.getenv("EVOLUTION_URL", "http://localhost:3001")
 EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY", "")
 INSTANCE = os.getenv("INSTANCE", "mi-agente-ia")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
