@@ -6,7 +6,7 @@ import { LeadInfo } from "./types";
 
 // Configuración de Gemini - Usar el modelo más avanzado disponible
 // (gemini-3-flash-preview)
-const GEMINI_MODEL = "gemini-flash-latest";
+const GEMINI_MODEL = "gemini-3-flash-preview";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 interface GeminiResponse {
@@ -339,7 +339,20 @@ Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.`
       };
     }
 
-    const data = JSON.parse(jsonMatch[0]) as {
+    // Escapar saltos de línea dentro de strings JSON para evitar errores de parsing
+    // Esto reemplaza newlines literales dentro de valores de string con \n escapado
+    let jsonStr = jsonMatch[0];
+
+    // Estrategia: reemplazar newlines dentro de strings JSON
+    // Buscar contenido entre comillas y escapar newlines
+    jsonStr = jsonStr.replace(/"([^"\\]|\\.)*"/g, (match) => {
+      return match
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+    });
+
+    const data = JSON.parse(jsonStr) as {
       reply?: string;
       order_items?: string[];
       total_price?: number;
@@ -358,6 +371,22 @@ Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.`
     };
   } catch (e) {
     console.error("Error parseando JSON de Gemini:", e, "Respuesta:", result.substring(0, 300));
+
+    // Intentar extraer el reply manualmente si el JSON falla
+    const replyMatch = result.match(/"reply"\s*:\s*"([\s\S]*?)(?:"\s*[,}])/);
+    if (replyMatch && replyMatch[1]) {
+      // Decodificar escapes básicos
+      const extractedReply = replyMatch[1]
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\r")
+        .replace(/\\t/g, "\t")
+        .replace(/\\"/g, '"');
+      return {
+        reply: cleanGeminiResponse(extractedReply),
+        action: "none",
+      };
+    }
+
     // Si no es JSON, usar el texto directamente
     return {
       reply: cleanGeminiResponse(result),
