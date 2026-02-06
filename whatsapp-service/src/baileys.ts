@@ -30,6 +30,7 @@ export interface ConnectionState {
 export interface IncomingMessage {
   messageId: string;
   phone: string;
+  jid: string; // JID original para responder (puede ser @s.whatsapp.net o @lid)
   text: string | null;
   imageUrl: string | null;
   timestamp: number;
@@ -101,17 +102,19 @@ export class WhatsAppClient extends EventEmitter {
   ): void {
     const { connection, lastDisconnect, qr } = update;
 
-    // Log para debug
-    if (config.devMode) {
-      console.log("🔍 Connection update:", JSON.stringify({ connection, hasQr: !!qr, lastDisconnect: lastDisconnect?.error?.message }));
-    }
+    // Log para debug - siempre mostrar estado de conexión
+    console.log("🔍 Connection update:", JSON.stringify({ 
+      connection, 
+      hasQr: !!qr, 
+      lastDisconnect: lastDisconnect?.error?.message 
+    }));
 
     // Nuevo QR disponible
     if (qr) {
       this.state.qrCode = qr;
       this.state.isConnected = false;
       this.emit("qr", qr);
-      console.log("📱 Nuevo QR generado - Ábrelo en http://localhost:3001");
+      console.log("📱 Nuevo QR generado - Escanéalo en la página web del servicio");
     }
 
     // Estado de conexión cambió
@@ -162,7 +165,17 @@ export class WhatsAppClient extends EventEmitter {
       // Solo procesar chats individuales (no grupos)
       if (msg.key.remoteJid.endsWith("@g.us")) continue;
 
-      const phone = msg.key.remoteJid.replace("@s.whatsapp.net", "");
+      // Guardar el JID original para poder responder
+      // Formatos posibles: 573001234567@s.whatsapp.net, 240355094069286@lid, etc.
+      const originalJid = msg.key.remoteJid;
+      
+      // Extraer identificador (puede ser número o LID)
+      const phone = originalJid
+        .replace("@s.whatsapp.net", "")
+        .replace("@lid", "")
+        .replace("@c.us", "");
+      
+      console.log(`🔍 JID original: ${originalJid}, phone extraído: ${phone}`);
       const messageContent = msg.message;
 
       if (!messageContent) continue;
@@ -201,6 +214,7 @@ export class WhatsAppClient extends EventEmitter {
       const incomingMessage: IncomingMessage = {
         messageId: msg.key.id || `${Date.now()}`,
         phone,
+        jid: originalJid, // Guardamos el JID original para responder
         text,
         imageUrl,
         timestamp: msg.messageTimestamp as number || Date.now() / 1000,
@@ -212,6 +226,16 @@ export class WhatsAppClient extends EventEmitter {
     }
   }
 
+  // Convertir número a JID de WhatsApp
+  private phoneToJid(phone: string): string {
+    if (phone.includes("@")) {
+      return phone; // Ya es un JID
+    }
+    // Limpiar el número y agregar sufijo estándar
+    const cleanPhone = phone.replace(/[^\d]/g, "");
+    return `${cleanPhone}@s.whatsapp.net`;
+  }
+
   // Enviar mensaje de texto
   async sendText(phone: string, text: string): Promise<boolean> {
     if (!this.socket || !this.state.isConnected) {
@@ -220,7 +244,7 @@ export class WhatsAppClient extends EventEmitter {
     }
 
     try {
-      const jid = phone.includes("@") ? phone : `${phone}@s.whatsapp.net`;
+      const jid = this.phoneToJid(phone);
       await this.socket.sendMessage(jid, { text });
       console.log(`📤 Mensaje enviado a ${phone}`);
       return true;
@@ -242,7 +266,7 @@ export class WhatsAppClient extends EventEmitter {
     }
 
     try {
-      const jid = phone.includes("@") ? phone : `${phone}@s.whatsapp.net`;
+      const jid = this.phoneToJid(phone);
       await this.socket.sendMessage(jid, {
         image: { url: imageUrl },
         caption: caption || "",
@@ -265,7 +289,7 @@ export class WhatsAppClient extends EventEmitter {
     }
 
     try {
-      const jid = phone.includes("@") ? phone : `${phone}@s.whatsapp.net`;
+      const jid = this.phoneToJid(phone);
       await this.socket.sendPresenceUpdate(presence, jid);
       return true;
     } catch (error) {

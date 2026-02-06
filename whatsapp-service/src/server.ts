@@ -162,6 +162,27 @@ app.get("/", (req: Request, res: Response) => {
                     <button type="submit" class="btn btn-danger">Desconectar</button>
                 </form>
             </div>
+        ` : state.lastDisconnectReason ? `
+            <div class="status disconnected">
+                <span class="status-dot"></span>
+                Desconectado: ${state.lastDisconnectReason}
+            </div>
+            ${currentQRBase64 ? `
+                <div class="qr-container">
+                    <img src="${currentQRBase64}" alt="Código QR de WhatsApp">
+                </div>
+            ` : `
+                <p style="color: #666; margin: 30px 0;">Esperando QR...</p>
+            `}
+            <div class="instructions">
+                <p style="margin-bottom: 10px;"><strong>Si el QR no aparece o la sesión está corrupta:</strong></p>
+            </div>
+            <div class="actions" style="margin-top: 15px;">
+                <form action="/api/reset" method="POST" style="display:inline;">
+                    <button type="submit" class="btn btn-danger">🔄 Reiniciar Sesión</button>
+                </form>
+            </div>
+            <button onclick="location.reload()" class="btn btn-refresh">Actualizar</button>
         ` : `
             <div class="status disconnected">
                 <span class="status-dot"></span>
@@ -292,6 +313,26 @@ app.post("/api/logout", async (req: Request, res: Response) => {
   res.json({ success: true, message: "Sesión cerrada" });
 });
 
+// Limpiar sesión completamente (para casos de sesión corrupta)
+app.post("/api/reset", async (req: Request, res: Response) => {
+  console.log("🔄 Limpiando sesión de WhatsApp...");
+  whatsappClient.clearSession();
+  
+  // Reconectar para generar nuevo QR
+  setTimeout(() => {
+    whatsappClient.connect();
+  }, 1000);
+
+  // Redirect to home if called from browser
+  const acceptHeader = req.headers.accept || "";
+  if (acceptHeader.includes("text/html")) {
+    res.redirect("/");
+    return;
+  }
+
+  res.json({ success: true, message: "Sesión limpiada, escanea el nuevo QR" });
+});
+
 // Health check
 app.get("/api/health", async (req: Request, res: Response) => {
   const waState = whatsappClient.getState();
@@ -366,7 +407,7 @@ export async function startServer(): Promise<void> {
   });
 
   whatsappClient.on("message", async (message: IncomingMessage) => {
-    console.log(`📩 Mensaje de ${message.phone}: ${message.text?.substring(0, 30) || "[imagen]"}...`);
+    console.log(`📩 Mensaje de ${message.phone} (JID: ${message.jid}): ${message.text?.substring(0, 30) || "[imagen]"}...`);
 
     // Procesar mensaje con el state machine de Convex
     const response = await convexClient.processMessage(message);
@@ -376,16 +417,19 @@ export async function startServer(): Promise<void> {
       return;
     }
 
+    // Usar el JID original para responder (importante para @lid)
+    const replyTo = message.jid;
+
     // Enviar respuesta automáticamente si hay una
     if (response.reply) {
       // Mostrar indicador de "escribiendo..."
-      await whatsappClient.sendPresence(message.phone, "composing");
+      await whatsappClient.sendPresence(replyTo, "composing");
 
       // Pequeña pausa para que se sienta más natural
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Enviar respuesta
-      const sent = await whatsappClient.sendText(message.phone, response.reply);
+      // Enviar respuesta usando el JID original
+      const sent = await whatsappClient.sendText(replyTo, response.reply);
 
       if (sent) {
         console.log(`📤 Respuesta enviada a ${message.phone} [${response.newStatus}]`);
@@ -395,7 +439,7 @@ export async function startServer(): Promise<void> {
 
       // Si hay imagen, enviarla también
       if (response.imageUrl) {
-        await whatsappClient.sendImage(message.phone, response.imageUrl);
+        await whatsappClient.sendImage(replyTo, response.imageUrl);
       }
     } else {
       console.log(`🔕 Sin respuesta para ${message.phone} (modo silencioso)`);
