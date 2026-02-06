@@ -4,8 +4,10 @@
 
 import { LeadInfo } from "./types";
 
-// Configuración de Gemini
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+// Configuración de Gemini - Usar el modelo más avanzado disponible
+// gemini-2.5-flash-preview-04-17 es equivalente al que se usaba en Python (gemini-3-flash-preview)
+const GEMINI_MODEL = "gemini-2.5-flash-preview-04-17";
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 interface GeminiResponse {
   candidates?: Array<{
@@ -15,6 +17,10 @@ interface GeminiResponse {
       }>;
     };
   }>;
+  error?: {
+    message?: string;
+    code?: number;
+  };
 }
 
 interface AIResponse {
@@ -24,8 +30,73 @@ interface AIResponse {
   action: string;
 }
 
-// Llamar a Gemini API
-async function callGemini(prompt: string, apiKey: string): Promise<string | null> {
+// Llamar a Gemini API con historial de chat
+async function callGemini(
+  systemPrompt: string,
+  conversationHistory: Array<{ role: string; text: string }>,
+  userMessage: string,
+  apiKey: string
+): Promise<string | null> {
+  try {
+    // Construir el historial de conversación como contexto
+    // Gemini REST API acepta múltiples "contents" para simular chat
+    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+
+    // Sistema + historial como primer mensaje del "user"
+    // (Gemini no tiene un rol "system" explícito en REST, lo incluimos como contexto)
+    let systemContext = systemPrompt;
+
+    if (conversationHistory.length > 0) {
+      systemContext += "\n\nHISTORIAL DE LA CONVERSACIÓN RECIENTE:\n";
+      for (const msg of conversationHistory) {
+        const role = msg.role === "in" ? "Cliente" : "Asistente";
+        systemContext += `${role}: ${msg.text}\n`;
+      }
+    }
+
+    // Primer turno: system context
+    contents.push({
+      role: "user",
+      parts: [{ text: systemContext + "\n\nMENSAJE ACTUAL DEL CLIENTE:\n\"" + userMessage + "\"" }],
+    });
+
+    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          temperature: 0.4, // Más bajo = más preciso y menos alucinaciones
+          maxOutputTokens: 2048,
+          topP: 0.8,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`Error llamando a Gemini (${response.status}):`, error);
+      return null;
+    }
+
+    const data = (await response.json()) as GeminiResponse;
+
+    if (data.error) {
+      console.error("Error de Gemini API:", data.error.message);
+      return null;
+    }
+
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+  } catch (error) {
+    console.error("Error en llamada a Gemini:", error);
+    return null;
+  }
+}
+
+// Llamar a Gemini con un solo prompt (para extracción simple)
+async function callGeminiSimple(prompt: string, apiKey: string): Promise<string | null> {
   try {
     const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
       method: "POST",
@@ -39,8 +110,8 @@ async function callGemini(prompt: string, apiKey: string): Promise<string | null
           },
         ],
         generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1024,
+          temperature: 0.1, // Muy bajo para extracción precisa
+          maxOutputTokens: 100,
         },
       }),
     });
@@ -85,14 +156,19 @@ REGLAS:
 
 Ejemplos:
 - "Hola me llamo Juan" → Juan
+- "Si, mi nombre es Pedro pero no se para que lo necesitas" → Pedro
 - "Maria Garcia" → Maria Garcia
 - "soy carlos y quiero pedir" → Carlos
+- "Buenos dias soy la señora Martha" → Martha
 - "Quiero ver el menú" → NO_NAME
 - "123456" → NO_NAME
+- "hola" → NO_NAME
+- "Si claro, me llamo Ana María Pérez" → Ana María Pérez
+- "Jajaja ok soy Roberto" → Roberto
 
 Responde SOLO con el nombre extraído (capitalizado correctamente) o NO_NAME. Sin explicaciones adicionales.`;
 
-  const result = await callGemini(prompt, apiKey);
+  const result = await callGeminiSimple(prompt, apiKey);
 
   if (!result) {
     return null;
@@ -123,18 +199,22 @@ Responde SOLO con el nombre extraído (capitalizado correctamente) o NO_NAME. Si
 
 // Limpiar respuesta de Gemini para WhatsApp
 function cleanGeminiResponse(text: string): string {
-  // Convertir **texto** a *texto*
+  // Convertir **texto** a *texto* (formato WhatsApp)
   text = text.replace(/\*\*(.*?)\*\*/g, "*$1*");
   // Convertir __texto__ a _texto_
   text = text.replace(/__(.*?)__/g, "_$1_");
+  // Convertir ~~texto~~ a ~texto~
+  text = text.replace(/~~(.*?)~~/g, "~$1~");
   // Limpiar asteriscos múltiples
   text = text.replace(/\*{3,}/g, "*");
-  // Formatear precios
+  // Formatear precios - $XXXXX a $XX,XXX
   text = text.replace(/\$(\d+)/g, (_, num) => `$${Number(num).toLocaleString()}`);
   return text.trim();
 }
 
-// Generar respuesta de ventas con Gemini
+// ============================================================
+// GENERAR RESPUESTA DE VENTAS CON GEMINI
+// ============================================================
 export async function generateSalesResponse(
   userText: string,
   leadInfo: LeadInfo,
@@ -142,64 +222,105 @@ export async function generateSalesResponse(
   conversationHistory: Array<{ direction: string; text: string }>,
   apiKey: string
 ): Promise<AIResponse> {
-  const historyText = conversationHistory
-    .slice(-10) // Últimos 10 mensajes
-    .map((msg) => `${msg.direction === "in" ? "Cliente" : "Asistente"}: ${msg.text}`)
-    .join("\n");
+  const customerName = leadInfo.name || "cliente";
 
-  const prompt = `Eres un asistente de ventas experto de un DISTRIBUIDOR DE CARNES CRUDAS de alta calidad. Vendemos carnes al por mayor y menor a clientes finales.
+  // Construir el pedido actual si existe
+  let currentOrderContext = "";
+  if (leadInfo.orderItems) {
+    try {
+      const items = JSON.parse(leadInfo.orderItems);
+      if (Array.isArray(items) && items.length > 0) {
+        currentOrderContext = `\nPEDIDO ACTUAL DEL CLIENTE:\n${items.map((i: string) => `• ${i}`).join("\n")}\nTotal actual: $${(leadInfo.orderTotal || 0).toLocaleString()}\n`;
+      }
+    } catch {
+      // Si no es JSON válido, ignorar
+    }
+  }
+
+  const systemPrompt = `Eres un asistente de ventas experto de un DISTRIBUIDOR DE CARNES CRUDAS de alta calidad. Vendemos carnes al por mayor y menor a clientes finales. Tu objetivo es ayudar al cliente a encontrar las carnes que necesita y cerrar la venta.
 
 INFORMACIÓN DEL CLIENTE:
-- Nombre: ${leadInfo.name || "No proporcionado"}
+- Nombre: ${customerName}
 - Ciudad: ${leadInfo.city || "No proporcionada"}
 - Email: ${leadInfo.email || "No proporcionado"}
 - Dirección: ${leadInfo.address || "No proporcionada"}
-- Estado: ${leadInfo.status}
-
-CATÁLOGO DE PRODUCTOS:
+- Estado actual: ${leadInfo.status}
+${currentOrderContext}
+CATÁLOGO COMPLETO DE CARNES Y COMBOS:
 ${catalog}
-
-HISTORIAL DE CONVERSACIÓN:
-${historyText}
-
-MENSAJE DEL CLIENTE:
-"${userText}"
 
 ZONAS DE COBERTURA:
 - ✅ Bogotá
 - ✅ Cali
-- ❌ OTRAS CIUDADES: NO ENTREGAMOS
+- ❌ OTRAS CIUDADES: NO ENTREGAMOS (debes informar al cliente amablemente)
 
-INSTRUCCIONES:
-1. Responde de forma profesional pero cercana
-2. Usa el nombre del cliente (${leadInfo.name || "cliente"}) de forma natural
-3. Recomienda productos y combos del catálogo
-4. Los COMBOS son más económicos - sugiérelos activamente
-5. Cuando muestres un combo, indica items gratis con "🎁 GRATIS"
-6. Si el cliente quiere pedir, resume productos y precio total
+FLUJO DE VENTAS:
 
-FORMATO DE MENSAJES (WhatsApp):
-- Listas: • Item 1
-- Precios: $XX,XXX
-- Negrita: *texto*
-- Gratis: 🎁 GRATIS
+1. **EXPLORACIÓN DE PRODUCTOS**:
+   - SIEMPRE usa el nombre del cliente (${customerName}) en tus respuestas de forma natural
+   - Recomienda productos individuales (carnes por kilo) y combos
+   - Explica las características de cada carne (ej: "Carne desmechada ideal para arepas, empanadas")
+   - Los COMBOS son MÁS ECONÓMICOS - sugiérelos activamente mencionando los items gratis cuando aplique
+   - Cuando muestres un combo, indica claramente qué items son gratis con "🎁 GRATIS"
+   - Calcula el precio total considerando los items gratis
+   - Menciona que vendemos al por mayor y menor
 
-RESPONDE EN JSON ESTRICTO:
+2. **CUANDO EL CLIENTE QUIERA HACER PEDIDO**:
+   - Resume los productos y precio total (considerando items gratis)
+   - Si ya tienes toda la info del cliente, responde con action: "ready_for_checkout"
+   - Si falta información, el sistema se la pedirá automáticamente
+
+REGLAS CRÍTICAS - LEE CON ATENCIÓN:
+- Sé profesional pero cercano y amable
+- Habla de carnes CRUDAS, no de comida preparada
+- Menciona que son productos frescos y de alta calidad
+- DESTACA LOS ITEMS GRATIS en los combos para hacerlos más atractivos
+- NO inventes productos que no estén en el catálogo
+- Si preguntan por una ciudad diferente a Bogotá o Cali, informa que NO entregamos allí
+- NUNCA confirmes un pedido que el cliente NO haya hecho explícitamente
+- NUNCA digas "tu pedido está listo" o "pedido confirmado" a menos que el cliente haya dicho claramente qué quiere comprar
+- Si el cliente solo está preguntando, explorando o saludando, NO asumas que quiere hacer un pedido
+- Solo usa action "ready_for_checkout" cuando el cliente EXPLÍCITAMENTE diga que quiere proceder con la compra (ej: "listo", "eso es todo", "confirmo", "quiero pedir eso")
+- Si el cliente pregunta precios o info de productos, eso NO es un pedido - es exploración
+
+FORMATO DE MENSAJES (IMPORTANTE - Usa formato WhatsApp):
+- Para listas usa bullets: • Item 1
+- Para precios usa: $XX,XXX
+- Para separadores usa: ━━━━━━━━━━━━━━━━━━━━━
+- Para destacar usa: *texto* (negrita simple)
+- Para gratis usa: 🎁 GRATIS
+- NO uses **texto** (doble asterisco) - usa solo *texto*
+
+FORMATO DE RESPUESTA JSON (ESTRICTO - solo JSON, sin texto antes ni después):
 {
-  "reply": "Tu respuesta al cliente...",
-  "order_items": ["Producto 1 - $X", "🎁 Producto 2 - GRATIS"],
-  "total_price": 0,
-  "action": "none" | "ready_for_checkout"
+    "reply": "Tu respuesta al cliente...",
+    "order_items": ["Producto 1 - $X", "🎁 Producto gratis - GRATIS"],
+    "total_price": 0,
+    "action": "none"
 }
 
-Si el cliente está listo para confirmar su pedido, usa action: "ready_for_checkout".
-Si no hay pedido aún, usa action: "none".`;
+VALORES VÁLIDOS PARA "action":
+- "none": Para la mayoría de interacciones (exploración, preguntas, saludos, etc.)
+- "ready_for_checkout": SOLO cuando el cliente dice explícitamente que quiere proceder a comprar
 
-  const result = await callGemini(prompt, apiKey);
+Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.`;
+
+  // Preparar historial formateado
+  const formattedHistory = conversationHistory.map((msg) => ({
+    role: msg.direction,
+    text: msg.text,
+  }));
+
+  const result = await callGemini(
+    systemPrompt,
+    formattedHistory,
+    userText,
+    apiKey
+  );
 
   if (!result) {
     return {
-      reply: "Lo siento, tuve un problema procesando tu solicitud. ¿Podrías repetir?",
+      reply: `Lo siento ${customerName}, tuve un problema procesando tu solicitud. ¿Podrías repetir?`,
       action: "none",
     };
   }
@@ -207,15 +328,36 @@ Si no hay pedido aún, usa action: "none".`;
   // Intentar parsear como JSON
   try {
     const cleanJson = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const data = JSON.parse(cleanJson) as AIResponse;
+
+    // Buscar el JSON en la respuesta (a veces Gemini agrega texto antes/después)
+    const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("No se encontró JSON en la respuesta de Gemini:", cleanJson.substring(0, 200));
+      return {
+        reply: cleanGeminiResponse(cleanJson),
+        action: "none",
+      };
+    }
+
+    const data = JSON.parse(jsonMatch[0]) as {
+      reply?: string;
+      order_items?: string[];
+      total_price?: number;
+      action?: string;
+    };
+
+    // Validar que la acción sea válida
+    const validActions = ["none", "ready_for_checkout"];
+    const parsedAction = validActions.includes(data.action || "") ? data.action! : "none";
 
     return {
       reply: cleanGeminiResponse(data.reply || ""),
-      orderItems: data.orderItems,
-      totalPrice: data.totalPrice,
-      action: data.action || "none",
+      orderItems: data.order_items,
+      totalPrice: data.total_price,
+      action: parsedAction,
     };
-  } catch {
+  } catch (e) {
+    console.error("Error parseando JSON de Gemini:", e, "Respuesta:", result.substring(0, 300));
     // Si no es JSON, usar el texto directamente
     return {
       reply: cleanGeminiResponse(result),

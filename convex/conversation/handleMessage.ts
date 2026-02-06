@@ -96,17 +96,35 @@ export const getCatalog = internalQuery({
     const products = await ctx.db.query("inventarioComidasRapidas").collect();
     const combos = await ctx.db.query("combos").collect();
 
-    let catalog = "PRODUCTOS INDIVIDUALES:\n";
+    let catalog = "PRODUCTOS INDIVIDUALES (carnes crudas por kilo o unidad):\n";
     for (const p of products) {
       if (p.disponible !== false) {
-        catalog += `• ${p.nombre} - $${p.precio.toLocaleString()} - ${p.descripcion || ""}\n`;
+        const desc = p.descripcion ? ` - ${p.descripcion}` : "";
+        catalog += `• ${p.nombre} - $${p.precio.toLocaleString()}${desc}\n`;
       }
     }
 
-    catalog += "\nCOMBOS:\n";
+    catalog += "\nCOMBOS (incluyen items gratis marcados con 🎁):\n";
     for (const c of combos) {
       if (c.disponible !== false) {
-        catalog += `• ${c.nombre} - $${c.precio.toLocaleString()} - ${c.descripcion || ""}\n`;
+        catalog += `\n📦 ${c.nombre} - $${c.precio.toLocaleString()}`;
+        if (c.descripcion) catalog += ` - ${c.descripcion}`;
+        catalog += "\n";
+
+        // Obtener items del combo
+        const items = await ctx.db
+          .query("comboItems")
+          .withIndex("by_combo_key", (q) => q.eq("comboKey", c.comboKey))
+          .collect();
+
+        for (const item of items) {
+          const qty = item.cantidad ?? item.qty ?? 1;
+          if (item.isFree) {
+            catalog += `  🎁 ${item.itemName} x${qty} - GRATIS\n`;
+          } else {
+            catalog += `  - ${item.itemName} x${qty}\n`;
+          }
+        }
       }
     }
 
