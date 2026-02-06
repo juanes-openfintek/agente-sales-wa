@@ -9,6 +9,7 @@
  */
 
 import type * as addresses from "../addresses.js";
+import type * as admin_resetConversations from "../admin/resetConversations.js";
 import type * as catalog from "../catalog.js";
 import type * as cleanup from "../cleanup.js";
 import type * as conversation_handleMessage from "../conversation/handleMessage.js";
@@ -30,6 +31,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   addresses: typeof addresses;
+  "admin/resetConversations": typeof admin_resetConversations;
   catalog: typeof catalog;
   cleanup: typeof cleanup;
   "conversation/handleMessage": typeof conversation_handleMessage;

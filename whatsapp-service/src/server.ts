@@ -1,10 +1,19 @@
 import express, { Request, Response } from "express";
+import cors from "cors";
 import QRCode from "qrcode";
 import { config } from "./config.js";
 import { whatsappClient, IncomingMessage } from "./baileys.js";
 import { convexClient } from "./convex-client.js";
 
 const app = express();
+
+// Configurar CORS para permitir peticiones desde el test-ui
+app.use(cors({
+  origin: "*", // En producción, especificar dominios permitidos
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+}));
+
 app.use(express.json());
 
 // Estado actual del QR en base64 para mostrar en web
