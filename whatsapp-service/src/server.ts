@@ -429,14 +429,19 @@ app.post("/test-webhook", async (req: Request, res: Response) => {
       phone,
       text: text || "",
       hasImage: has_image || false,
+      imageData: image_data || null,
       pushName: null,
     });
 
+    if (!response) {
+      return res.status(500).json({ error: "No se recibió respuesta de Convex" });
+    }
+
     res.json({
       success: true,
-      reply: response.reply,
-      new_status: response.newStatus,
-      action: response.action,
+      reply: response.reply || "",
+      new_status: response.newStatus || "unknown",
+      action: response.action || "none",
     });
   } catch (error) {
     console.error("Error en test-webhook:", error);
@@ -486,8 +491,9 @@ app.get("/test-conversations", async (req: Request, res: Response) => {
 
 // Obtener historial de conversación
 app.get("/history/:phone", async (req: Request, res: Response) => {
-  const { phone } = req.params;
-  const limit = parseInt(req.query.limit as string) || 50;
+  const phone = Array.isArray(req.params.phone) ? req.params.phone[0] : req.params.phone;
+  const limitParam = req.query.limit;
+  const limit = parseInt(typeof limitParam === 'string' ? limitParam : '50') || 50;
 
   try {
     const events = await convexClient.getConversationHistory(phone, limit);
@@ -500,7 +506,7 @@ app.get("/history/:phone", async (req: Request, res: Response) => {
 
 // Resetear conversación de prueba
 app.post("/reset-test/:phone", async (req: Request, res: Response) => {
-  const { phone } = req.params;
+  const phone = Array.isArray(req.params.phone) ? req.params.phone[0] : req.params.phone;
 
   try {
     await convexClient.resetConversation(phone);

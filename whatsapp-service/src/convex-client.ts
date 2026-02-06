@@ -110,13 +110,13 @@ export class ConvexClient {
   // Obtener todos los leads (para test-ui)
   async getAllLeads(): Promise<any[]> {
     const result = await this.request("/leads/all");
-    return result || [];
+    return Array.isArray(result) ? result : [];
   }
 
   // Obtener historial de conversación (para test-ui)
   async getConversationHistory(phone: string, limit: number = 50): Promise<any[]> {
     const result = await this.request(`/history/${phone}?limit=${limit}`);
-    return result || [];
+    return Array.isArray(result) ? result : [];
   }
 
   // Resetear conversación (para test-ui)
