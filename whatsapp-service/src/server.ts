@@ -426,10 +426,12 @@ app.post("/test-webhook", async (req: Request, res: Response) => {
   try {
     // Llamar a Convex para procesar el mensaje
     const response = await convexClient.processMessage({
+      messageId: `test-${Date.now()}`,
       phone,
+      jid: `${phone}@s.whatsapp.net`,
       text: text || "",
-      hasImage: has_image || false,
-      imageData: image_data || null,
+      imageUrl: image_data || null,
+      timestamp: Date.now() / 1000,
       pushName: null,
     });
 
