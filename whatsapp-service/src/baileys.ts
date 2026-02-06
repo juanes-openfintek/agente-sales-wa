@@ -278,8 +278,11 @@ export class WhatsAppClient extends EventEmitter {
   clearSession(): void {
     // Cerrar socket existente si hay uno
     if (this.socket) {
-      this.socket.ev.removeAllListeners();
-      this.socket.end(new Error("Session cleared"));
+      try {
+        this.socket.end(new Error("Session cleared"));
+      } catch (error) {
+        console.error("Error cerrando socket:", error);
+      }
       this.socket = null;
     }
 
