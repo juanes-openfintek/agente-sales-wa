@@ -47,6 +47,10 @@ export class WhatsAppClient extends EventEmitter {
     lastDisconnectReason: null,
   };
 
+  // Guards contra reconexiones concurrentes
+  private isReconnecting = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor() {
     super();
   }
@@ -56,44 +60,94 @@ export class WhatsAppClient extends EventEmitter {
     return { ...this.state };
   }
 
+  // Cerrar el socket actual de forma segura (SIN borrar sesión)
+  private closeExistingSocket(): void {
+    if (this.socket) {
+      try {
+        // Eliminar todos los listeners para evitar callbacks fantasma
+        this.socket.ev.removeAllListeners("connection.update");
+        this.socket.ev.removeAllListeners("creds.update");
+        this.socket.ev.removeAllListeners("messages.upsert");
+        // Terminar el socket
+        this.socket.end(undefined);
+      } catch (error) {
+        console.error("⚠️  Error cerrando socket anterior:", error);
+      }
+      this.socket = null;
+    }
+  }
+
   // Iniciar conexión con WhatsApp
   async connect(): Promise<void> {
-    // Asegurar que existe el directorio de autenticación
-    if (!fs.existsSync(config.authDir)) {
-      fs.mkdirSync(config.authDir, { recursive: true });
+    // Evitar reconexiones concurrentes
+    if (this.isReconnecting) {
+      console.log("⏳ Ya hay una reconexión en curso, ignorando...");
+      return;
     }
 
-    const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
+    this.isReconnecting = true;
 
-    // Obtener la última versión de WhatsApp Web
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`📱 Usando WA Web v${version.join(".")} (latest: ${isLatest})`);
+    try {
+      // IMPORTANTE: Cerrar socket anterior antes de crear uno nuevo
+      this.closeExistingSocket();
 
-    this.socket = makeWASocket({
-      version,
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
-      },
-      logger,
-      browser: ["Chrome (Linux)", "", ""],
-      generateHighQualityLinkPreview: true,
-      syncFullHistory: false,
-      markOnlineOnConnect: false,
-    });
+      // Asegurar que existe el directorio de autenticación
+      if (!fs.existsSync(config.authDir)) {
+        fs.mkdirSync(config.authDir, { recursive: true });
+      }
 
-    // Manejar eventos de conexión
-    this.socket.ev.on("connection.update", (update) => {
-      this.handleConnectionUpdate(update);
-    });
+      const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
 
-    // Guardar credenciales cuando cambien
-    this.socket.ev.on("creds.update", saveCreds);
+      // Obtener la última versión de WhatsApp Web
+      const { version, isLatest } = await fetchLatestBaileysVersion();
+      console.log(`📱 Usando WA Web v${version.join(".")} (latest: ${isLatest})`);
 
-    // Manejar mensajes entrantes
-    this.socket.ev.on("messages.upsert", (m) => {
-      this.handleIncomingMessages(m);
-    });
+      this.socket = makeWASocket({
+        version,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, logger),
+        },
+        logger,
+        browser: ["Chrome (Linux)", "", ""],
+        generateHighQualityLinkPreview: true,
+        syncFullHistory: false,
+        markOnlineOnConnect: false,
+      });
+
+      // Manejar eventos de conexión
+      this.socket.ev.on("connection.update", (update) => {
+        this.handleConnectionUpdate(update);
+      });
+
+      // Guardar credenciales cuando cambien
+      this.socket.ev.on("creds.update", saveCreds);
+
+      // Manejar mensajes entrantes
+      this.socket.ev.on("messages.upsert", (m) => {
+        this.handleIncomingMessages(m);
+      });
+    } catch (error) {
+      console.error("❌ Error en connect():", error);
+    } finally {
+      this.isReconnecting = false;
+    }
+  }
+
+  // Programar reconexión con guard
+  private scheduleReconnect(delayMs: number, reason: string): void {
+    // Cancelar reconexión previa si hay una pendiente
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    console.log(`🔄 Reconectando en ${delayMs / 1000}s (razón: ${reason})...`);
+
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      await this.connect();
+    }, delayMs);
   }
 
   // Manejar actualizaciones de conexión
@@ -125,18 +179,22 @@ export class WhatsAppClient extends EventEmitter {
       this.state.isConnected = false;
       this.state.lastDisconnectReason = DisconnectReason[statusCode] || `Code: ${statusCode}`;
 
-      console.log(`❌ Desconectado: ${this.state.lastDisconnectReason}`);
+      console.log(`❌ Desconectado: ${this.state.lastDisconnectReason} (code: ${statusCode})`);
 
       if (statusCode === DisconnectReason.loggedOut) {
         // Logout intencional - limpiar sesión y reconectar para nuevo QR
         this.clearSession();
         this.emit("logout");
-        console.log("🔄 Generando nuevo QR en 3 segundos...");
-        setTimeout(() => this.connect(), 3000);
+        this.scheduleReconnect(3000, "loggedOut - nuevo QR");
+      } else if (statusCode === DisconnectReason.connectionReplaced) {
+        // Otra sesión tomó el control - NO reconectar automáticamente
+        // ya que causaría un loop infinito de conflictos
+        console.log("⚠️  Otra sesión de WhatsApp Web está activa. NO reconectando automáticamente.");
+        console.log("⚠️  Cierra las otras sesiones de WhatsApp Web y usa /api/reset para reconectar.");
       } else if (shouldReconnect) {
-        // Reconectar solo si tiene sentido
-        console.log("🔄 Reconectando en 5 segundos...");
-        setTimeout(() => this.connect(), 5000);
+        // Para otros errores (timeout, stream error, etc.) reconectar con delay
+        const delay = statusCode === DisconnectReason.restartRequired ? 1000 : 5000;
+        this.scheduleReconnect(delay, this.state.lastDisconnectReason || "unknown");
       }
     } else if (connection === "connecting") {
       console.log("⏳ Conectando a WhatsApp...");
@@ -144,6 +202,7 @@ export class WhatsAppClient extends EventEmitter {
       this.state.isConnected = true;
       this.state.qrCode = null;
       this.state.phoneNumber = this.socket?.user?.id?.split(":")[0] || null;
+      this.state.lastDisconnectReason = null;
 
       console.log(`✅ Conectado como: +${this.state.phoneNumber}`);
       this.emit("connected", this.state.phoneNumber);
@@ -166,7 +225,7 @@ export class WhatsAppClient extends EventEmitter {
       if (msg.key.remoteJid.endsWith("@g.us")) continue;
 
       // Guardar el JID original para poder responder
-      // Formatos posibles: 573001234567@s.whatsapp.net, 240355094069286@lid, etc.
+      // Formatos posibles: 573001234567@s.whatsapp.net, 224098609319972@lid, etc.
       const originalJid = msg.key.remoteJid;
       
       // Extraer identificador (puede ser número o LID)
@@ -226,37 +285,35 @@ export class WhatsAppClient extends EventEmitter {
     }
   }
 
-  // Convertir número a JID de WhatsApp
-  private phoneToJid(phone: string): string {
-    if (phone.includes("@")) {
-      return phone; // Ya es un JID
-    }
-    // Limpiar el número y agregar sufijo estándar
-    const cleanPhone = phone.replace(/[^\d]/g, "");
-    return `${cleanPhone}@s.whatsapp.net`;
-  }
-
   // Enviar mensaje de texto
-  async sendText(phone: string, text: string): Promise<boolean> {
+  async sendText(jid: string, text: string): Promise<boolean> {
     if (!this.socket || !this.state.isConnected) {
       console.error("❌ No conectado a WhatsApp");
       return false;
     }
 
     try {
-      const jid = this.phoneToJid(phone);
-      await this.socket.sendMessage(jid, { text });
-      console.log(`📤 Mensaje enviado a ${phone}`);
+      // El JID debe tener el formato completo (ej: 573001234567@s.whatsapp.net o 224098609319972@lid)
+      const targetJid = jid.includes("@") ? jid : `${jid}@s.whatsapp.net`;
+      console.log(`📤 Enviando mensaje a JID: ${targetJid}`);
+      
+      const result = await this.socket.sendMessage(targetJid, { text });
+      
+      if (result?.status) {
+        console.log(`📤 Mensaje enviado a ${jid} (status: ${result.status})`);
+      } else {
+        console.log(`📤 Mensaje enviado a ${jid}`);
+      }
       return true;
     } catch (error) {
-      console.error("Error enviando mensaje:", error);
+      console.error(`❌ Error enviando mensaje a ${jid}:`, error);
       return false;
     }
   }
 
   // Enviar imagen con caption
   async sendImage(
-    phone: string,
+    jid: string,
     imageUrl: string,
     caption?: string
   ): Promise<boolean> {
@@ -266,22 +323,22 @@ export class WhatsAppClient extends EventEmitter {
     }
 
     try {
-      const jid = this.phoneToJid(phone);
-      await this.socket.sendMessage(jid, {
+      const targetJid = jid.includes("@") ? jid : `${jid}@s.whatsapp.net`;
+      await this.socket.sendMessage(targetJid, {
         image: { url: imageUrl },
         caption: caption || "",
       });
-      console.log(`📤 Imagen enviada a ${phone}`);
+      console.log(`📤 Imagen enviada a ${jid}`);
       return true;
     } catch (error) {
-      console.error("Error enviando imagen:", error);
+      console.error(`❌ Error enviando imagen a ${jid}:`, error);
       return false;
     }
   }
 
   // Enviar presencia (escribiendo...)
   async sendPresence(
-    phone: string,
+    jid: string,
     presence: "composing" | "recording" | "paused" = "composing"
   ): Promise<boolean> {
     if (!this.socket || !this.state.isConnected) {
@@ -289,25 +346,24 @@ export class WhatsAppClient extends EventEmitter {
     }
 
     try {
-      const jid = this.phoneToJid(phone);
-      await this.socket.sendPresenceUpdate(presence, jid);
+      const targetJid = jid.includes("@") ? jid : `${jid}@s.whatsapp.net`;
+      await this.socket.sendPresenceUpdate(presence, targetJid);
       return true;
     } catch (error) {
-      console.error("Error enviando presencia:", error);
+      // Presencia no es crítica, no hacer log ruidoso
       return false;
     }
   }
 
-  // Limpiar sesión
+  // Limpiar sesión completamente (borra credenciales)
   clearSession(): void {
-    // Cerrar socket existente si hay uno
-    if (this.socket) {
-      try {
-        this.socket.end(new Error("Session cleared"));
-      } catch (error) {
-        console.error("Error cerrando socket:", error);
-      }
-      this.socket = null;
+    // Cerrar socket existente
+    this.closeExistingSocket();
+
+    // Cancelar reconexión pendiente
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
 
     if (fs.existsSync(config.authDir)) {
@@ -322,10 +378,20 @@ export class WhatsAppClient extends EventEmitter {
     };
   }
 
-  // Desconectar
+  // Desconectar (logout de WhatsApp)
   async disconnect(): Promise<void> {
+    // Cancelar reconexión pendiente
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (this.socket) {
-      await this.socket.logout();
+      try {
+        await this.socket.logout();
+      } catch (error) {
+        console.error("Error en logout:", error);
+      }
       this.socket = null;
     }
   }
