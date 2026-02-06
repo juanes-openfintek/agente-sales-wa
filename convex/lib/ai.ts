@@ -6,7 +6,7 @@ import { LeadInfo } from "./types";
 
 // Configuración de Gemini - Usar el modelo más avanzado disponible
 // gemini-2.5-flash-preview-04-17 es equivalente al que se usaba en Python (gemini-3-flash-preview)
-const GEMINI_MODEL = "gemini-2.5-flash-preview-04-17";
+const GEMINI_MODEL = "gemini-3-flash-preview";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 interface GeminiResponse {
