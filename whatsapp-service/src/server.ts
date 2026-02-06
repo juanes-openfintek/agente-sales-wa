@@ -150,6 +150,15 @@ app.get("/", (req: Request, res: Response) => {
         .btn-refresh:hover {
             background: #5a6fd6;
         }
+        .btn-success {
+            background: #28a745;
+            color: white;
+            font-size: 16px;
+            padding: 15px 40px;
+        }
+        .btn-success:hover {
+            background: #218838;
+        }
         .actions {
             margin-top: 20px;
         }
@@ -171,31 +180,10 @@ app.get("/", (req: Request, res: Response) => {
                     <button type="submit" class="btn btn-danger">Desconectar</button>
                 </form>
             </div>
-        ` : state.lastDisconnectReason ? `
+        ` : state.isWaitingForQR ? `
             <div class="status disconnected">
                 <span class="status-dot"></span>
-                Desconectado: ${state.lastDisconnectReason}
-            </div>
-            ${currentQRBase64 ? `
-                <div class="qr-container">
-                    <img src="${currentQRBase64}" alt="Código QR de WhatsApp">
-                </div>
-            ` : `
-                <p style="color: #666; margin: 30px 0;">Esperando QR...</p>
-            `}
-            <div class="instructions">
-                <p style="margin-bottom: 10px;"><strong>Si el QR no aparece o la sesión está corrupta:</strong></p>
-            </div>
-            <div class="actions" style="margin-top: 15px;">
-                <form action="/api/reset" method="POST" style="display:inline;">
-                    <button type="submit" class="btn btn-danger">🔄 Reiniciar Sesión</button>
-                </form>
-            </div>
-            <button onclick="location.reload()" class="btn btn-refresh">Actualizar</button>
-        ` : `
-            <div class="status disconnected">
-                <span class="status-dot"></span>
-                Esperando conexión
+                Esperando escaneo del QR${state.lastDisconnectReason ? ` (${state.lastDisconnectReason})` : ''}
             </div>
             ${currentQRBase64 ? `
                 <div class="qr-container">
@@ -212,13 +200,36 @@ app.get("/", (req: Request, res: Response) => {
             ` : `
                 <p style="color: #666; margin: 30px 0;">Generando código QR...</p>
             `}
+            <div class="actions" style="margin-top: 15px;">
+                <form action="/api/reset" method="POST" style="display:inline;">
+                    <button type="submit" class="btn btn-danger">🔄 Reiniciar Sesión</button>
+                </form>
+            </div>
             <button onclick="location.reload()" class="btn btn-refresh">Actualizar</button>
+        ` : `
+            <div class="status disconnected">
+                <span class="status-dot"></span>
+                No conectado${state.lastDisconnectReason ? ` (${state.lastDisconnectReason})` : ''}
+            </div>
+            <p style="color: #666; margin: 30px 0;">Haz clic en el botón para generar el código QR de conexión.</p>
+            <div class="actions">
+                <form action="/api/connect" method="POST" style="display:inline;">
+                    <button type="submit" class="btn btn-success">📱 Iniciar Conexión</button>
+                </form>
+            </div>
+            ${state.lastDisconnectReason ? `
+                <div class="actions" style="margin-top: 15px;">
+                    <form action="/api/reset" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-danger">🔄 Reiniciar Sesión</button>
+                    </form>
+                </div>
+            ` : ''}
         `}
     </div>
 
     <script>
-        // Auto-refresh cada 10 segundos si no está conectado
-        ${!state.isConnected ? 'setTimeout(() => location.reload(), 10000);' : ''}
+        // Auto-refresh cada 5 segundos SOLO si estamos esperando el escaneo del QR
+        ${state.isWaitingForQR ? 'setTimeout(() => location.reload(), 5000);' : ''}
     </script>
 </body>
 </html>
@@ -326,7 +337,7 @@ app.post("/api/logout", async (req: Request, res: Response) => {
 app.post("/api/reset", async (req: Request, res: Response) => {
   console.log("🔄 Limpiando sesión de WhatsApp...");
   whatsappClient.clearSession();
-  
+
   // Reconectar para generar nuevo QR
   setTimeout(() => {
     whatsappClient.connect();
@@ -340,6 +351,33 @@ app.post("/api/reset", async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, message: "Sesión limpiada, escanea el nuevo QR" });
+});
+
+// Iniciar conexión manualmente (generar QR)
+app.post("/api/connect", async (req: Request, res: Response) => {
+  const state = whatsappClient.getState();
+
+  if (state.isConnected) {
+    const acceptHeader = req.headers.accept || "";
+    if (acceptHeader.includes("text/html")) {
+      res.redirect("/");
+      return;
+    }
+    res.json({ success: false, message: "Ya está conectado" });
+    return;
+  }
+
+  console.log("🚀 Iniciando conexión manual con WhatsApp...");
+  whatsappClient.connect();
+
+  // Redirect to home if called from browser
+  const acceptHeader = req.headers.accept || "";
+  if (acceptHeader.includes("text/html")) {
+    res.redirect("/");
+    return;
+  }
+
+  res.json({ success: true, message: "Iniciando conexión, escanea el QR" });
 });
 
 // Health check
@@ -573,8 +611,9 @@ export async function startServer(): Promise<void> {
     }
   });
 
-  // Iniciar conexión con WhatsApp
-  await whatsappClient.connect();
+  // NO auto-conectar - el usuario debe hacer clic en "Iniciar Conexión"
+  // para generar el QR cuando esté listo para escanearlo
+  // await whatsappClient.connect();
 
   // Iniciar servidor HTTP
   app.listen(config.port, () => {
@@ -584,7 +623,7 @@ export async function startServer(): Promise<void> {
 ║   🚀 WhatsApp Service iniciado                         ║
 ║                                                        ║
 ║   📍 URL Local: http://localhost:${config.port}                ║
-║   📱 Escanea el QR para conectar WhatsApp              ║
+║   📱 Haz clic en "Iniciar Conexión" para generar QR    ║
 ║                                                        ║
 ╚════════════════════════════════════════════════════════╝
     `);

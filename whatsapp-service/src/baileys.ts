@@ -21,6 +21,7 @@ const logger = pino({
 // Interfaz para el estado de conexión
 export interface ConnectionState {
   isConnected: boolean;
+  isWaitingForQR: boolean; // true cuando se inició la conexión y esperamos que escaneen el QR
   qrCode: string | null;
   phoneNumber: string | null;
   lastDisconnectReason: string | null;
@@ -42,6 +43,7 @@ export class WhatsAppClient extends EventEmitter {
   private socket: WASocket | null = null;
   private state: ConnectionState = {
     isConnected: false,
+    isWaitingForQR: false,
     qrCode: null,
     phoneNumber: null,
     lastDisconnectReason: null,
@@ -167,6 +169,7 @@ export class WhatsAppClient extends EventEmitter {
     if (qr) {
       this.state.qrCode = qr;
       this.state.isConnected = false;
+      this.state.isWaitingForQR = true;
       this.emit("qr", qr);
       console.log("📱 Nuevo QR generado - Escanéalo en la página web del servicio");
     }
@@ -189,9 +192,11 @@ export class WhatsAppClient extends EventEmitter {
       } else if (statusCode === DisconnectReason.connectionReplaced) {
         // Otra sesión tomó el control - NO reconectar automáticamente
         // ya que causaría un loop infinito de conflictos
+        this.state.isWaitingForQR = false;
         console.log("⚠️  Otra sesión de WhatsApp Web está activa. NO reconectando automáticamente.");
         console.log("⚠️  Cierra las otras sesiones de WhatsApp Web y usa /api/reset para reconectar.");
       } else if (shouldReconnect) {
+        // Mantener isWaitingForQR = true porque vamos a reconectar
         // Para otros errores (timeout, stream error, etc.) reconectar con delay
         const delay = statusCode === DisconnectReason.restartRequired ? 1000 : 5000;
         this.scheduleReconnect(delay, this.state.lastDisconnectReason || "unknown");
@@ -200,6 +205,7 @@ export class WhatsAppClient extends EventEmitter {
       console.log("⏳ Conectando a WhatsApp...");
     } else if (connection === "open") {
       this.state.isConnected = true;
+      this.state.isWaitingForQR = false;
       this.state.qrCode = null;
       this.state.phoneNumber = this.socket?.user?.id?.split(":")[0] || null;
       this.state.lastDisconnectReason = null;
@@ -372,6 +378,7 @@ export class WhatsAppClient extends EventEmitter {
     }
     this.state = {
       isConnected: false,
+      isWaitingForQR: false,
       qrCode: null,
       phoneNumber: null,
       lastDisconnectReason: null,
