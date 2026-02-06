@@ -11,20 +11,20 @@ export function formatWhatsAppMessage(text: string): string {
 
 // Mensaje de bienvenida
 export function formatWelcomeMessage(): string {
-  return `¡Hola! 👋 Bienvenido a *Comidas Rápidas*.
+  return `🥩 ¡Hola! Bienvenido a nuestro distribuidor de *carnes finas* de alta calidad.
 
-Soy tu asistente virtual y estoy aquí para ayudarte con tu pedido.
+Para empezar, ¿cuál es tu nombre?
 
-Para comenzar, *¿me podrías decir tu nombre?*`;
+📝 *Ejemplo:* Juan`;
 }
 
 // Nombre capturado
 export function formatNameCaptured(name: string): string {
-  return `¡Mucho gusto, *${name}*! 🎉
+  return `¡Perfecto, *${name}*! Somos distribuidores de carnes finas de alta calidad. 🥩
 
-Ahora puedo ayudarte con tu pedido. ¿Qué te gustaría ordenar hoy?
+Tenemos productos individuales por kilo y combos especiales. ¿Qué te gustaría ver?
 
-Tenemos hamburguesas, perros calientes, combos y más. Solo dime qué se te antoja.`;
+Puedo mostrarte nuestro catálogo completo o recomendarte algo según tus necesidades.`;
 }
 
 // Pedir nombre de nuevo
@@ -36,9 +36,11 @@ Solo necesito tu nombre para personalizar tu experiencia. 😊`;
 
 // Pedir nombre con intención de pedido
 export function formatNameWithOrderIntent(): string {
-  return `¡Excelente! Veo que quieres hacer un pedido. 🍔
+  return `¡Perfecto! Veo que quieres hacer un pedido. 🥩
 
-Pero primero, *¿me podrías decir tu nombre?* Así puedo atenderte mejor.`;
+Antes de continuar, ¿me puedes decir tu nombre?
+
+📝 *Ejemplo:* Juan`;
 }
 
 // Solicitar datos de envío faltantes
@@ -115,42 +117,31 @@ Responde con el *número* o el *nombre* del método de pago.`;
 
 // Solicitar comprobante de transferencia
 export function formatTransferProofRequest(paymentMethod: string): string {
-  return `Has seleccionado pago por *${paymentMethod}*.
+  return `Excelente. Por favor envía el comprobante de tu transferencia *${paymentMethod}* para confirmar tu pedido.
 
-Por favor, realiza la transferencia a:
-
-${SEPARATOR}
-🏦 *DATOS PARA TRANSFERENCIA*
-${SEPARATOR}
-• Banco: ${paymentMethod}
-• Tipo: Ahorros
-• Número: 123-456789-00
-• Titular: Comidas Rápidas SAS
-${SEPARATOR}
-
-Una vez realices el pago, *envíame una foto o captura del comprobante* para confirmar tu pedido.`;
+Puedes enviarlo como imagen o screenshot.`;
 }
 
 // Pago completado - transferencia
 export function formatPaymentCompletedTransfer(scheduleAck: string = ""): string {
-  return `${scheduleAck}¡Gracias! 🙏 He recibido tu comprobante.
+  return `${scheduleAck}¡Comprobante recibido! 📋
 
-Tu pedido está siendo procesado y llegará en las próximas *24 horas*.
+Tu pago está *en revisión*. Un asesor lo verificará y te confirmará a la brevedad.
 
-Te enviaremos un correo con los detalles de seguimiento.
-
-¡Gracias por tu compra! 🍔`;
+Por último, ¿en cuánto tiempo te gustaría hacer tu próximo pedido? 🗓️
+Así te recordamos cuando sea el momento.`;
 }
 
 // Pago completado - contra entrega
 export function formatPaymentCompletedCash(): string {
-  return `¡Perfecto! Tu pedido ha sido confirmado. ✅
+  return `¡Pedido confirmado! 🎉
 
-Pagarás *en efectivo* al momento de la entrega.
+Tu orden está siendo preparada. Pagarás en efectivo al recibir.
 
-Tu pedido llegará en las próximas *24 horas*.
+Te estaremos avisando cuando tu pedido esté en camino. ¡Gracias por tu compra!
 
-¡Gracias por tu compra! 🍔`;
+Por último, ¿en cuánto tiempo te gustaría hacer tu próximo pedido? 🗓️
+Así te recordamos cuando sea el momento.`;
 }
 
 // Pedido cancelado
@@ -187,9 +178,11 @@ También puedes escribir "nuevo pedido" para comenzar uno nuevo.`;
 
 // Nuevo pedido
 export function formatNewOrderPrompt(): string {
-  return `¡Claro! Estoy listo para un nuevo pedido. 🍔
+  return `¡Claro! Me encanta que quieras hacer otro pedido. 🥩
 
-¿Qué te gustaría ordenar esta vez?`;
+Vamos a empezar de nuevo. ¿Qué te gustaría ordenar esta vez?
+
+Puedo mostrarte nuestro catálogo o recomendarte algo según tus necesidades.`;
 }
 
 // Saludo cliente recurrente
@@ -216,11 +209,9 @@ Dime qué te gustaría cambiar, agregar o quitar.`;
 
 // Preferencia de notificación guardada
 export function formatNotifyPreferenceSaved(preference: string): string {
-  return `¡Anotado! 📝
+  return `¡Perfecto! Anotado: te avisaremos *${preference}* para tu próximo pedido. 📝
 
-Te avisaremos ${preference} para tu próximo pedido.
-
-¡Gracias por elegirnos!`;
+¡Fue un placer atenderte! Si necesitas algo más, aquí estaremos. 🥩`;
 }
 
 // Selección de dirección guardada
