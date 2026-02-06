@@ -392,6 +392,116 @@ app.post("/chat/sendPresence/:instance", async (req: Request, res: Response) => 
   res.json({ success });
 });
 
+// ==================== TEST UI ENDPOINTS ====================
+// Endpoints para el test-ui (simulador de WhatsApp)
+
+// Endpoint de salud simplificado para test-ui
+app.get("/health", async (req: Request, res: Response) => {
+  const waState = whatsappClient.getState();
+  res.json({
+    status: "ok",
+    connected: waState.isConnected,
+    phone: waState.phoneNumber,
+  });
+});
+
+// Simular webhook de WhatsApp para testing
+app.post("/test-webhook", async (req: Request, res: Response) => {
+  const { phone, text, has_image, image_data } = req.body;
+
+  if (!phone) {
+    res.status(400).json({ error: "phone es requerido" });
+    return;
+  }
+
+  try {
+    // Llamar a Convex para procesar el mensaje
+    const response = await convexClient.processMessage({
+      phone,
+      text: text || "",
+      hasImage: has_image || false,
+      pushName: null,
+    });
+
+    res.json({
+      success: true,
+      reply: response.reply,
+      new_status: response.newStatus,
+      action: response.action,
+    });
+  } catch (error) {
+    console.error("Error en test-webhook:", error);
+    res.status(500).json({ error: "Error procesando mensaje" });
+  }
+});
+
+// Obtener conversaciones de prueba
+app.get("/test-conversations", async (req: Request, res: Response) => {
+  try {
+    // Obtener todos los leads de Convex
+    const leads = await convexClient.getAllLeads();
+    
+    // Filtrar solo los de prueba (teléfonos que empiezan con test, demo, etc.)
+    const testLeads = leads.filter((lead: any) => {
+      const phone = lead.phone.toLowerCase();
+      return (
+        phone.startsWith("test") ||
+        phone.startsWith("demo") ||
+        phone.startsWith("prueba") ||
+        phone.startsWith("dev") ||
+        phone.startsWith("qa") ||
+        phone.endsWith("999") ||
+        phone.endsWith("888") ||
+        phone.endsWith("777") ||
+        phone.length < 7
+      );
+    });
+
+    // Convertir a formato esperado por test-ui
+    const conversations: Record<string, any> = {};
+    for (const lead of testLeads) {
+      conversations[lead.phone] = {
+        name: lead.name,
+        status: lead.status,
+        events_count: 0, // Podríamos contar eventos si es necesario
+        last_activity: lead.updatedAt || lead.createdAt,
+      };
+    }
+
+    res.json({ test_conversations: conversations });
+  } catch (error) {
+    console.error("Error obteniendo conversaciones:", error);
+    res.status(500).json({ error: "Error obteniendo conversaciones" });
+  }
+});
+
+// Obtener historial de conversación
+app.get("/history/:phone", async (req: Request, res: Response) => {
+  const { phone } = req.params;
+  const limit = parseInt(req.query.limit as string) || 50;
+
+  try {
+    const events = await convexClient.getConversationHistory(phone, limit);
+    res.json({ events });
+  } catch (error) {
+    console.error("Error obteniendo historial:", error);
+    res.status(500).json({ error: "Error obteniendo historial" });
+  }
+});
+
+// Resetear conversación de prueba
+app.post("/reset-test/:phone", async (req: Request, res: Response) => {
+  const { phone } = req.params;
+
+  try {
+    await convexClient.resetConversation(phone);
+    res.json({ success: true, message: `Conversación de ${phone} reseteada` });
+  } catch (error) {
+    console.error("Error reseteando conversación:", error);
+    res.status(500).json({ error: "Error reseteando conversación" });
+  }
+});
+
 // ==================== INICIALIZACIÓN ====================
 
 export async function startServer(): Promise<void> {

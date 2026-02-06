@@ -317,4 +317,103 @@ http.route({
   }),
 });
 
+// GET /leads/all - Obtener todos los leads (para test-ui)
+http.route({
+  path: "/leads/all",
+  method: "GET",
+  handler: httpAction(async (ctx) => {
+    try {
+      const leads = await ctx.runQuery(internal.conversation.handleMessage.getAllLeads);
+      return new Response(JSON.stringify(leads), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      console.error("Error getting leads:", error);
+      return new Response(
+        JSON.stringify({ error: String(error) }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+  }),
+});
+
+// GET /history/:phone - Obtener historial de conversación (para test-ui)
+http.route({
+  path: "/history/:phone",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const url = new URL(request.url);
+      const phone = url.pathname.split("/").pop() || "";
+      const limit = parseInt(url.searchParams.get("limit") || "50");
+
+      const events = await ctx.runQuery(
+        internal.conversation.handleMessage.getConversationHistory,
+        { phone, limit }
+      );
+
+      return new Response(JSON.stringify(events), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      console.error("Error getting history:", error);
+      return new Response(
+        JSON.stringify({ error: String(error) }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+  }),
+});
+
+// POST /reset/:phone - Resetear conversación (para test-ui)
+http.route({
+  path: "/reset/:phone",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const url = new URL(request.url);
+      const phone = url.pathname.split("/").pop() || "";
+
+      await ctx.runMutation(
+        internal.conversation.handleMessage.upsertLead,
+        {
+          phone,
+          status: "collecting_info",
+          orderItems: undefined,
+          orderTotal: undefined,
+          paymentMethod: undefined,
+          cedula: undefined,
+          completedMessageSent: undefined,
+          deliveryTime: undefined,
+        }
+      );
+
+      return new Response(
+        JSON.stringify({ success: true, message: `Conversación de ${phone} reseteada` }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    } catch (error) {
+      console.error("Error resetting conversation:", error);
+      return new Response(
+        JSON.stringify({ error: String(error) }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+  }),
+});
+
 export default http;

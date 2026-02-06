@@ -62,6 +62,13 @@ export const getLeadByPhone = internalQuery({
   },
 });
 
+export const getAllLeads = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("leads").collect();
+  },
+});
+
 export const countIncomingMessages = internalQuery({
   args: { phone: v.string() },
   handler: async (ctx, args) => {

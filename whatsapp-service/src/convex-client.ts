@@ -106,6 +106,24 @@ export class ConvexClient {
     const result = await this.request<{ status: string }>("/health");
     return result?.status === "ok";
   }
+
+  // Obtener todos los leads (para test-ui)
+  async getAllLeads(): Promise<any[]> {
+    const result = await this.request("/leads/all");
+    return result || [];
+  }
+
+  // Obtener historial de conversación (para test-ui)
+  async getConversationHistory(phone: string, limit: number = 50): Promise<any[]> {
+    const result = await this.request(`/history/${phone}?limit=${limit}`);
+    return result || [];
+  }
+
+  // Resetear conversación (para test-ui)
+  async resetConversation(phone: string): Promise<boolean> {
+    const result = await this.request(`/reset/${phone}`, "POST");
+    return result !== null;
+  }
 }
 
 // Instancia singleton
