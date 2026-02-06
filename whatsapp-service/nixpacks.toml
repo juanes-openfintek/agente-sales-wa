@@ -2,7 +2,7 @@
 # Especifica Node 20 porque Baileys lo requiere
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = ["npm ci"]
