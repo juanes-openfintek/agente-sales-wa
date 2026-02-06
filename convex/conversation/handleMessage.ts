@@ -3,7 +3,7 @@
 // ============================================================
 
 import { v } from "convex/values";
-import { action, internalMutation, internalQuery } from "../_generated/server";
+import { internalAction, internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import {
   ConversationState,
@@ -190,7 +190,7 @@ export const saveEvent = internalMutation({
 // MAIN ACTION - PROCESS MESSAGE
 // ============================================================
 
-export const processMessage = action({
+export const processMessage = internalAction({
   args: {
     phone: v.string(),
     text: v.string(),
