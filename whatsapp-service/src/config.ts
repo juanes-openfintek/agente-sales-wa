@@ -1,5 +1,4 @@
 import dotenv from "dotenv";
-import path from "path";
 
 dotenv.config();
 
@@ -7,18 +6,31 @@ export const config = {
   // Servidor
   port: parseInt(process.env.PORT || "3001", 10),
 
-  // Convex
+  // Convex backend
   convexUrl: process.env.CONVEX_URL || "",
 
-  // Modo desarrollo (muestra QR en terminal)
-  devMode: process.env.DEV_MODE === "true",
-
-  // Directorio para guardar la sesión de WhatsApp
-  authDir: path.join(process.cwd(), "auth_info"),
+  // WhatsApp Cloud API
+  whatsapp: {
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+    businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "",
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
+    webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "",
+    appSecret: process.env.WHATSAPP_APP_SECRET || "",
+    apiVersion: process.env.WHATSAPP_API_VERSION || "v21.0",
+  },
 };
 
 export function validateConfig(): void {
   if (!config.convexUrl) {
     console.warn("⚠️  CONVEX_URL no está configurada. Las llamadas a Convex fallarán.");
+  }
+  if (!config.whatsapp.phoneNumberId) {
+    console.error("❌ WHATSAPP_PHONE_NUMBER_ID es requerido.");
+  }
+  if (!config.whatsapp.accessToken) {
+    console.error("❌ WHATSAPP_ACCESS_TOKEN es requerido.");
+  }
+  if (!config.whatsapp.webhookVerifyToken) {
+    console.error("❌ WHATSAPP_WEBHOOK_VERIFY_TOKEN es requerido.");
   }
 }

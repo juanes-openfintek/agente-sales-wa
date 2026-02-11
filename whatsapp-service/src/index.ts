@@ -1,11 +1,11 @@
-import { config, validateConfig } from "./config.js";
+import { validateConfig } from "./config.js";
 import { startServer } from "./server.js";
 
 console.log(`
 ╔════════════════════════════════════════════════════════╗
 ║                                                        ║
-║   WhatsApp Service con Baileys                         ║
-║   Agente Sales WA - Sistema de Conexión Propio         ║
+║   WhatsApp Cloud API Service                           ║
+║   Agente Sales WA - Meta Business API                  ║
 ║                                                        ║
 ╚════════════════════════════════════════════════════════╝
 `);

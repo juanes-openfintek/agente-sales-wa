@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-service",
-  "version": "1.0.0",
-  "description": "Servicio WhatsApp con Baileys para agente de ventas",
+  "version": "2.0.0",
+  "description": "Servicio WhatsApp Cloud API para agente de ventas",
   "type": "module",
   "main": "dist/index.js",
   "engines": {
@@ -11,28 +11,25 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "clean": "rimraf dist auth_info"
+    "clean": "rimraf dist"
   },
   "keywords": [
     "whatsapp",
-    "baileys",
-    "bot"
+    "cloud-api",
+    "bot",
+    "meta"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@types/cors": "^2.8.19",
-    "@whiskeysockets/baileys": "^6.7.16",
     "cors": "^2.8.6",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "pino": "^9.6.0",
-    "qrcode": "^1.5.4"
+    "express": "^4.21.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
-    "@types/qrcode": "^1.5.5",
     "rimraf": "^6.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { IncomingMessage } from "./baileys.js";
+import { IncomingMessage } from "./cloud-api.js";
 
 // Respuesta del state machine
 export interface StateMachineResponse {

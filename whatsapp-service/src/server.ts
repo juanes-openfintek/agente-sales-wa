@@ -1,9 +1,9 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
-import QRCode from "qrcode";
 import { config } from "./config.js";
-import { whatsappClient, IncomingMessage } from "./baileys.js";
+import { whatsappClient, IncomingMessage } from "./cloud-api.js";
 import { convexClient } from "./convex-client.js";
+import { webhookRouter, setMessageHandler } from "./webhook.js";
 
 const app = express();
 
@@ -14,14 +14,18 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization", "Accept"],
 }));
 
-app.use(express.json());
+// JSON parser con captura de raw body (para verificación de firma del webhook)
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  },
+}));
 
-// Estado actual del QR en base64 para mostrar en web
-let currentQRBase64: string | null = null;
+// Montar rutas del webhook de Meta (GET /webhook y POST /webhook)
+app.use(webhookRouter);
 
-// ==================== PÁGINAS WEB ====================
+// ==================== PÁGINA DE STATUS ====================
 
-// Página principal con QR
 app.get("/", (req: Request, res: Response) => {
   const state = whatsappClient.getState();
 
@@ -31,206 +35,72 @@ app.get("/", (req: Request, res: Response) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp - Agente Sales</title>
+    <title>WhatsApp Cloud API - Agente Sales</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f0f2f5;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
         }
-        .container {
+        .card {
             background: white;
-            border-radius: 20px;
-            padding: 40px;
-            max-width: 450px;
+            border-radius: 12px;
+            padding: 32px;
+            max-width: 500px;
             width: 100%;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
-        h1 {
-            color: #1a1a2e;
-            margin-bottom: 10px;
-            font-size: 24px;
-        }
-        .subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
+        h1 { margin: 0 0 8px; color: #1a1a2e; }
+        .subtitle { color: #888; margin: 0 0 24px; font-size: 14px; }
         .status {
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            padding: 10px 20px;
-            border-radius: 50px;
+            padding: 8px 16px;
+            border-radius: 20px;
             font-weight: 500;
-            margin-bottom: 25px;
+            margin-bottom: 16px;
         }
-        .status.connected {
-            background: #d4edda;
-            color: #155724;
+        .status.ok { background: #d4edda; color: #155724; }
+        .status.err { background: #f8d7da; color: #721c24; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .ok .dot { background: #28a745; }
+        .err .dot { background: #dc3545; }
+        .info { margin: 12px 0; color: #555; font-size: 14px; }
+        .info strong { color: #333; }
+        code {
+            background: #f1f3f5;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            word-break: break-all;
         }
-        .status.disconnected {
-            background: #fff3cd;
-            color: #856404;
-        }
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-        .connected .status-dot { background: #28a745; }
-        .disconnected .status-dot { background: #ffc107; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .qr-container {
-            background: #f8f9fa;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 25px;
-        }
-        .qr-container img {
-            max-width: 280px;
-            width: 100%;
-            height: auto;
-        }
-        .phone-number {
-            font-size: 18px;
-            color: #333;
-            margin-bottom: 20px;
-        }
-        .phone-number strong {
-            color: #667eea;
-        }
-        .instructions {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 20px;
-            text-align: left;
-            font-size: 14px;
-            color: #555;
-        }
-        .instructions ol {
-            padding-left: 20px;
-        }
-        .instructions li {
-            margin-bottom: 8px;
-        }
-        .btn {
-            display: inline-block;
-            padding: 12px 30px;
-            border-radius: 50px;
-            font-weight: 600;
-            text-decoration: none;
-            transition: all 0.3s;
-            border: none;
-            cursor: pointer;
-            font-size: 14px;
-        }
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-        .btn-danger:hover {
-            background: #c82333;
-        }
-        .btn-refresh {
-            background: #667eea;
-            color: white;
-            margin-top: 15px;
-        }
-        .btn-refresh:hover {
-            background: #5a6fd6;
-        }
-        .btn-success {
-            background: #28a745;
-            color: white;
-            font-size: 16px;
-            padding: 15px 40px;
-        }
-        .btn-success:hover {
-            background: #218838;
-        }
-        .actions {
-            margin-top: 20px;
-        }
+        .error-text { color: #dc3545; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>WhatsApp Agente Sales</h1>
-        <p class="subtitle">Sistema de conexión propio con Baileys</p>
+    <div class="card">
+        <h1>WhatsApp Cloud API</h1>
+        <p class="subtitle">Agente Sales - Meta Business API</p>
 
-        ${state.isConnected ? `
-            <div class="status connected">
-                <span class="status-dot"></span>
-                Conectado
-            </div>
-            <p class="phone-number">Número: <strong>+${state.phoneNumber}</strong></p>
-            <div class="actions">
-                <form action="/api/logout" method="POST" style="display:inline;">
-                    <button type="submit" class="btn btn-danger">Desconectar</button>
-                </form>
-            </div>
-        ` : state.isWaitingForQR ? `
-            <div class="status disconnected">
-                <span class="status-dot"></span>
-                Esperando escaneo del QR${state.lastDisconnectReason ? ` (${state.lastDisconnectReason})` : ''}
-            </div>
-            ${currentQRBase64 ? `
-                <div class="qr-container">
-                    <img src="${currentQRBase64}" alt="Código QR de WhatsApp">
-                </div>
-                <div class="instructions">
-                    <ol>
-                        <li>Abre WhatsApp en tu teléfono</li>
-                        <li>Ve a <strong>Configuración > Dispositivos vinculados</strong></li>
-                        <li>Toca en <strong>Vincular dispositivo</strong></li>
-                        <li>Escanea este código QR</li>
-                    </ol>
-                </div>
-            ` : `
-                <p style="color: #666; margin: 30px 0;">Generando código QR...</p>
-            `}
-            <div class="actions" style="margin-top: 15px;">
-                <form action="/api/reset" method="POST" style="display:inline;">
-                    <button type="submit" class="btn btn-danger">🔄 Reiniciar Sesión</button>
-                </form>
-            </div>
-            <button onclick="location.reload()" class="btn btn-refresh">Actualizar</button>
-        ` : `
-            <div class="status disconnected">
-                <span class="status-dot"></span>
-                No conectado${state.lastDisconnectReason ? ` (${state.lastDisconnectReason})` : ''}
-            </div>
-            <p style="color: #666; margin: 30px 0;">Haz clic en el botón para generar el código QR de conexión.</p>
-            <div class="actions">
-                <form action="/api/connect" method="POST" style="display:inline;">
-                    <button type="submit" class="btn btn-success">📱 Iniciar Conexión</button>
-                </form>
-            </div>
-            ${state.lastDisconnectReason ? `
-                <div class="actions" style="margin-top: 15px;">
-                    <form action="/api/reset" method="POST" style="display:inline;">
-                        <button type="submit" class="btn btn-danger">🔄 Reiniciar Sesión</button>
-                    </form>
-                </div>
-            ` : ''}
-        `}
+        <div class="status ${state.isConnected ? 'ok' : 'err'}">
+            <span class="dot"></span>
+            ${state.isConnected ? 'Conectado' : 'Desconectado'}
+        </div>
+
+        ${state.phoneNumber ? `<p class="info">Teléfono: <strong>${state.phoneNumber}</strong></p>` : ''}
+        ${state.lastError ? `<p class="info error-text">Error: ${state.lastError}</p>` : ''}
+
+        <p class="info">Webhook URL: <code>${req.protocol}://${req.get('host')}/webhook</code></p>
+        <p class="info" style="color: #888; font-size: 12px; margin-top: 20px;">
+            Configura esta URL en Meta Business Manager &gt; WhatsApp &gt; Configuración &gt; Webhook
+        </p>
     </div>
-
-    <script>
-        // Auto-refresh cada 5 segundos SOLO si estamos esperando el escaneo del QR
-        ${state.isWaitingForQR ? 'setTimeout(() => location.reload(), 5000);' : ''}
-    </script>
 </body>
 </html>
   `;
@@ -243,41 +113,6 @@ app.get("/", (req: Request, res: Response) => {
 // Estado de la conexión
 app.get("/api/status", (req: Request, res: Response) => {
   res.json(whatsappClient.getState());
-});
-
-// Obtener QR en formato texto
-app.get("/api/qr", (req: Request, res: Response) => {
-  const state = whatsappClient.getState();
-
-  if (state.isConnected) {
-    res.json({ success: false, message: "Ya conectado", qr: null });
-    return;
-  }
-
-  if (!state.qrCode) {
-    res.json({ success: false, message: "QR no disponible aún", qr: null });
-    return;
-  }
-
-  res.json({ success: true, qr: state.qrCode });
-});
-
-// Obtener QR como imagen
-app.get("/api/qr/image", async (req: Request, res: Response) => {
-  const state = whatsappClient.getState();
-
-  if (state.isConnected || !state.qrCode) {
-    res.status(404).send("QR no disponible");
-    return;
-  }
-
-  try {
-    const qrBuffer = await QRCode.toBuffer(state.qrCode, { width: 300 });
-    res.setHeader("Content-Type", "image/png");
-    res.send(qrBuffer);
-  } catch (error) {
-    res.status(500).send("Error generando QR");
-  }
 });
 
 // Enviar mensaje de texto
@@ -306,7 +141,33 @@ app.post("/api/send/image", async (req: Request, res: Response) => {
   res.json({ success });
 });
 
-// Enviar presencia (escribiendo...)
+// Enviar botones interactivos
+app.post("/api/send/buttons", async (req: Request, res: Response) => {
+  const { phone, body: bodyText, buttons, header, footer } = req.body;
+
+  if (!phone || !bodyText || !buttons) {
+    res.status(400).json({ success: false, error: "phone, body y buttons son requeridos" });
+    return;
+  }
+
+  const success = await whatsappClient.sendButtons(phone, bodyText, buttons, header, footer);
+  res.json({ success });
+});
+
+// Enviar lista interactiva
+app.post("/api/send/list", async (req: Request, res: Response) => {
+  const { phone, body: bodyText, buttonText, sections, header, footer } = req.body;
+
+  if (!phone || !bodyText || !sections) {
+    res.status(400).json({ success: false, error: "phone, body y sections son requeridos" });
+    return;
+  }
+
+  const success = await whatsappClient.sendList(phone, bodyText, buttonText, sections, header, footer);
+  res.json({ success });
+});
+
+// Enviar presencia (no-op en Cloud API)
 app.post("/api/presence", async (req: Request, res: Response) => {
   const { phone, presence } = req.body;
 
@@ -317,67 +178,6 @@ app.post("/api/presence", async (req: Request, res: Response) => {
 
   const success = await whatsappClient.sendPresence(phone, presence || "composing");
   res.json({ success });
-});
-
-// Cerrar sesión
-app.post("/api/logout", async (req: Request, res: Response) => {
-  await whatsappClient.disconnect();
-
-  // Redirect to home if called from browser
-  const acceptHeader = req.headers.accept || "";
-  if (acceptHeader.includes("text/html")) {
-    res.redirect("/");
-    return;
-  }
-
-  res.json({ success: true, message: "Sesión cerrada" });
-});
-
-// Limpiar sesión completamente (para casos de sesión corrupta)
-app.post("/api/reset", async (req: Request, res: Response) => {
-  console.log("🔄 Limpiando sesión de WhatsApp...");
-  whatsappClient.clearSession();
-
-  // Reconectar para generar nuevo QR
-  setTimeout(() => {
-    whatsappClient.connect();
-  }, 1000);
-
-  // Redirect to home if called from browser
-  const acceptHeader = req.headers.accept || "";
-  if (acceptHeader.includes("text/html")) {
-    res.redirect("/");
-    return;
-  }
-
-  res.json({ success: true, message: "Sesión limpiada, escanea el nuevo QR" });
-});
-
-// Iniciar conexión manualmente (generar QR)
-app.post("/api/connect", async (req: Request, res: Response) => {
-  const state = whatsappClient.getState();
-
-  if (state.isConnected) {
-    const acceptHeader = req.headers.accept || "";
-    if (acceptHeader.includes("text/html")) {
-      res.redirect("/");
-      return;
-    }
-    res.json({ success: false, message: "Ya está conectado" });
-    return;
-  }
-
-  console.log("🚀 Iniciando conexión manual con WhatsApp...");
-  whatsappClient.connect();
-
-  // Redirect to home if called from browser
-  const acceptHeader = req.headers.accept || "";
-  if (acceptHeader.includes("text/html")) {
-    res.redirect("/");
-    return;
-  }
-
-  res.json({ success: true, message: "Iniciando conexión, escanea el QR" });
 });
 
 // Health check
@@ -466,7 +266,7 @@ app.post("/test-webhook", async (req: Request, res: Response) => {
     const response = await convexClient.processMessage({
       messageId: `test-${Date.now()}`,
       phone,
-      jid: `${phone}@s.whatsapp.net`,
+      jid: phone,
       text: text || "",
       imageUrl: image_data || null,
       timestamp: Date.now() / 1000,
@@ -494,7 +294,7 @@ app.get("/test-conversations", async (req: Request, res: Response) => {
   try {
     // Obtener todos los leads de Convex
     const leads = await convexClient.getAllLeads();
-    
+
     // Filtrar solo los de prueba (teléfonos que empiezan con test, demo, etc.)
     const testLeads = leads.filter((lead: any) => {
       const phone = lead.phone.toLowerCase();
@@ -517,7 +317,7 @@ app.get("/test-conversations", async (req: Request, res: Response) => {
       conversations[lead.phone] = {
         name: lead.name,
         status: lead.status,
-        events_count: 0, // Podríamos contar eventos si es necesario
+        events_count: 0,
         last_activity: lead.updatedAt || lead.createdAt,
       };
     }
@@ -560,19 +360,12 @@ app.post("/reset-test/:phone", async (req: Request, res: Response) => {
 // ==================== INICIALIZACIÓN ====================
 
 export async function startServer(): Promise<void> {
-  // Escuchar eventos de WhatsApp
-  whatsappClient.on("qr", async (qr: string) => {
-    // Generar QR como base64 para mostrar en la web
-    currentQRBase64 = await QRCode.toDataURL(qr, { width: 300 });
-  });
+  // Inicializar Cloud API (verificar token)
+  await whatsappClient.initialize();
 
-  whatsappClient.on("connected", (phone: string) => {
-    currentQRBase64 = null;
-    console.log(`✅ WhatsApp conectado: ${phone}`);
-  });
-
-  whatsappClient.on("message", async (message: IncomingMessage) => {
-    console.log(`📩 Mensaje de ${message.phone} (JID: ${message.jid}): ${message.text?.substring(0, 30) || "[imagen]"}...`);
+  // Configurar handler de mensajes del webhook
+  setMessageHandler(async (message: IncomingMessage) => {
+    console.log(`📩 Mensaje de ${message.phone}: ${message.text?.substring(0, 30) || "[media]"}...`);
 
     // Procesar mensaje con el state machine de Convex
     const response = await convexClient.processMessage(message);
@@ -582,18 +375,14 @@ export async function startServer(): Promise<void> {
       return;
     }
 
-    // Usar el JID original para responder (importante para @lid)
-    const replyTo = message.jid;
+    const replyTo = message.phone;
 
     // Enviar respuesta automáticamente si hay una
     if (response.reply) {
-      // Mostrar indicador de "escribiendo..."
-      await whatsappClient.sendPresence(replyTo, "composing");
-
       // Pequeña pausa para que se sienta más natural
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Enviar respuesta usando el JID original
+      // Enviar respuesta
       const sent = await whatsappClient.sendText(replyTo, response.reply);
 
       if (sent) {
@@ -611,19 +400,15 @@ export async function startServer(): Promise<void> {
     }
   });
 
-  // NO auto-conectar - el usuario debe hacer clic en "Iniciar Conexión"
-  // para generar el QR cuando esté listo para escanearlo
-  // await whatsappClient.connect();
-
   // Iniciar servidor HTTP
   app.listen(config.port, () => {
     console.log(`
 ╔════════════════════════════════════════════════════════╗
 ║                                                        ║
-║   🚀 WhatsApp Service iniciado                         ║
+║   🚀 WhatsApp Cloud API Service iniciado               ║
 ║                                                        ║
-║   📍 URL Local: http://localhost:${config.port}                ║
-║   📱 Haz clic en "Iniciar Conexión" para generar QR    ║
+║   📍 URL: http://localhost:${config.port}                     ║
+║   🔗 Webhook: http://localhost:${config.port}/webhook          ║
 ║                                                        ║
 ╚════════════════════════════════════════════════════════╝
     `);
