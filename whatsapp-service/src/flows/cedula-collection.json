@@ -1,0 +1,40 @@
+{
+  "version": "6.3",
+  "screens": [
+    {
+      "id": "CEDULA_SCREEN",
+      "title": "Número de Cédula",
+      "terminal": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Cédula de Ciudadanía 🪪"
+          },
+          {
+            "type": "TextBody",
+            "text": "Necesitamos tu número de cédula para procesar tu pedido y generar la factura."
+          },
+          {
+            "type": "TextInput",
+            "name": "cedula",
+            "label": "Número de cédula",
+            "input-type": "number",
+            "required": true,
+            "helper-text": "Entre 6 y 12 dígitos"
+          },
+          {
+            "type": "Footer",
+            "label": "Continuar",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

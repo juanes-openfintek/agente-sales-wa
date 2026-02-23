@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { config } from "./config.js";
 import { whatsappClient, IncomingMessage } from "./cloud-api.js";
+import { parseFlowResponse } from "./flow-manager.js";
 
 export const webhookRouter = Router();
 
@@ -196,9 +197,11 @@ async function handleIncomingMessage(
 // Procesar respuestas de WhatsApp Flows
 function handleFlowResponse(nfmReply: any): string {
   try {
-    const responseData = JSON.parse(nfmReply.response_json || "{}");
-    // Convertir respuesta del Flow a texto que el state machine pueda parsear
-    return `[FLOW_RESPONSE] ${JSON.stringify(responseData)}`;
+    const responseJson = nfmReply.response_json || "{}";
+    // Convertir datos estructurados del Flow a texto que el state machine entienda
+    const parsedText = parseFlowResponse(responseJson);
+    console.log(`📋 Flow response parseada: "${parsedText}"`);
+    return parsedText;
   } catch {
     return nfmReply.body || "";
   }

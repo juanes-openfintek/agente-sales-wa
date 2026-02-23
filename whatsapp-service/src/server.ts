@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { whatsappClient, IncomingMessage } from "./cloud-api.js";
 import { convexClient } from "./convex-client.js";
 import { webhookRouter, setMessageHandler } from "./webhook.js";
+import { trySendFlow } from "./flow-manager.js";
 
 const app = express();
 
@@ -382,13 +383,19 @@ export async function startServer(): Promise<void> {
       // Pequeña pausa para que se sienta más natural
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Enviar respuesta
-      const sent = await whatsappClient.sendText(replyTo, response.reply);
+      // Intentar enviar un Flow si el estado lo requiere
+      // Si no hay Flow configurado o falla, enviar texto normal
+      const flowSent = await trySendFlow(replyTo, response.newStatus, response.reply);
 
-      if (sent) {
-        console.log(`📤 Respuesta enviada a ${message.phone} [${response.newStatus}]`);
-      } else {
-        console.error(`❌ Error enviando respuesta a ${message.phone}`);
+      if (!flowSent) {
+        // Enviar como texto normal
+        const sent = await whatsappClient.sendText(replyTo, response.reply);
+
+        if (sent) {
+          console.log(`📤 Respuesta enviada a ${message.phone} [${response.newStatus}]`);
+        } else {
+          console.error(`❌ Error enviando respuesta a ${message.phone}`);
+        }
       }
 
       // Si hay imagen, enviarla también

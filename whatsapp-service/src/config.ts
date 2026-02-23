@@ -17,6 +17,11 @@ export const config = {
     webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "",
     appSecret: process.env.WHATSAPP_APP_SECRET || "",
     apiVersion: process.env.WHATSAPP_API_VERSION || "v21.0",
+
+    // WhatsApp Flow IDs (opcionales — si no están, se usa texto normal)
+    flowNameId: process.env.WHATSAPP_FLOW_NAME_ID || "",
+    flowDeliveryId: process.env.WHATSAPP_FLOW_DELIVERY_ID || "",
+    flowCedulaId: process.env.WHATSAPP_FLOW_CEDULA_ID || "",
   },
 };
 

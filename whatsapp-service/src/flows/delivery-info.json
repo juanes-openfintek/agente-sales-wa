@@ -1,0 +1,58 @@
+{
+  "version": "6.3",
+  "screens": [
+    {
+      "id": "DELIVERY_SCREEN",
+      "title": "Datos de Entrega",
+      "terminal": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Información de Envío 📦"
+          },
+          {
+            "type": "TextBody",
+            "text": "Completa los datos para coordinar la entrega de tu pedido."
+          },
+          {
+            "type": "Dropdown",
+            "name": "city",
+            "label": "Ciudad",
+            "required": true,
+            "data-source": [
+              { "id": "Bogotá", "title": "Bogotá" },
+              { "id": "Cali", "title": "Cali" }
+            ]
+          },
+          {
+            "type": "TextInput",
+            "name": "address",
+            "label": "Dirección de entrega",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Ej: Calle 123 #45-67, Barrio Centro"
+          },
+          {
+            "type": "TextInput",
+            "name": "email",
+            "label": "Correo electrónico",
+            "input-type": "email",
+            "required": true,
+            "helper-text": "Para enviarte la confirmación del pedido"
+          },
+          {
+            "type": "Footer",
+            "label": "Continuar",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "version": "6.3",
+  "screens": [
+    {
+      "id": "NAME_SCREEN",
+      "title": "Datos del Cliente",
+      "terminal": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Distribuidor de Carnes Finas 🥩"
+          },
+          {
+            "type": "TextBody",
+            "text": "Para brindarte la mejor atención, necesitamos tu nombre completo."
+          },
+          {
+            "type": "TextInput",
+            "name": "customer_name",
+            "label": "Nombre completo",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Ejemplo: Juan Pérez"
+          },
+          {
+            "type": "Footer",
+            "label": "Continuar",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
