@@ -225,8 +225,10 @@ export const processMessage = internalAction({
   handler: async (ctx, args): Promise<StateMachineResponse> => {
     const { phone, text, hasImage, pushName } = args;
 
-    // Obtener API key de Gemini (configurada con `npx convex env set GEMINI_API_KEY`)
+    // Obtener API keys de IA (Gemini primario, Groq como fallback)
+    // Configurar con: npx convex env set GEMINI_API_KEY ... / npx convex env set GROQ_API_KEY ...
     const geminiApiKey = process.env.GEMINI_API_KEY || "";
+    const groqApiKey = process.env.GROQ_API_KEY || "";
 
     // Guardar evento entrante
     await ctx.runMutation(internal.conversation.handleMessage.saveEvent, {
@@ -302,8 +304,8 @@ export const processMessage = internalAction({
         // Intentar extraer nombre con IA
         let extractedName: string | null = null;
 
-        if (geminiApiKey) {
-          extractedName = await extractNameWithAI(text, geminiApiKey);
+        if (geminiApiKey || groqApiKey) {
+          extractedName = await extractNameWithAI(text, geminiApiKey, groqApiKey);
         }
 
         // Fallback a validación simple si no hay IA
@@ -347,8 +349,8 @@ export const processMessage = internalAction({
         }
       }
 
-      // Usar IA para generar respuesta de ventas
-      if (geminiApiKey) {
+      // Usar IA para generar respuesta de ventas (Gemini primario, Groq como fallback)
+      if (geminiApiKey || groqApiKey) {
         const catalog = await ctx.runQuery(
           internal.conversation.handleMessage.getCatalog,
           {}
@@ -363,7 +365,8 @@ export const processMessage = internalAction({
           leadInfo,
           catalog,
           history,
-          geminiApiKey
+          geminiApiKey,
+          groqApiKey
         );
 
         reply = formatWhatsAppMessage(aiResponse.reply);

@@ -1,5 +1,5 @@
 // ============================================================
-// SERVICIO DE IA CON GEMINI
+// SERVICIO DE IA CON GEMINI + FALLBACK A GROQ
 // ============================================================
 
 import { LeadInfo } from "./types";
@@ -8,6 +8,10 @@ import { LeadInfo } from "./types";
 // (gemini-3-flash-preview)
 const GEMINI_MODEL = "gemini-3-flash-preview";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// Configuración de Groq (fallback)
+const GROQ_MODEL = "openai/gpt-oss-20b";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 interface GeminiResponse {
   candidates?: Array<{
@@ -20,6 +24,18 @@ interface GeminiResponse {
   error?: {
     message?: string;
     code?: number;
+  };
+}
+
+interface GroqResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  error?: {
+    message?: string;
+    code?: string;
   };
 }
 
@@ -130,10 +146,143 @@ async function callGeminiSimple(prompt: string, apiKey: string): Promise<string 
   }
 }
 
+// ============================================================
+// GROQ API (Fallback)
+// ============================================================
+
+// Llamar a Groq API con historial de chat (usa formato OpenAI-compatible)
+async function callGroq(
+  systemPrompt: string,
+  conversationHistory: Array<{ role: string; text: string }>,
+  userMessage: string,
+  apiKey: string
+): Promise<string | null> {
+  try {
+    const messages: Array<{ role: string; content: string }> = [
+      { role: "system", content: systemPrompt },
+    ];
+
+    // Agregar historial de conversación con roles correctos
+    for (const msg of conversationHistory) {
+      messages.push({
+        role: msg.role === "in" ? "user" : "assistant",
+        content: msg.text,
+      });
+    }
+
+    // Mensaje actual del usuario
+    messages.push({ role: "user", content: userMessage });
+
+    const response = await fetch(GROQ_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages,
+        temperature: 0.4,
+        max_tokens: 2048,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`Error llamando a Groq (${response.status}):`, error);
+      return null;
+    }
+
+    const data = (await response.json()) as GroqResponse;
+
+    if (data.error) {
+      console.error("Error de Groq API:", data.error.message);
+      return null;
+    }
+
+    return data.choices?.[0]?.message?.content || null;
+  } catch (error) {
+    console.error("Error en llamada a Groq:", error);
+    return null;
+  }
+}
+
+// Llamar a Groq con un solo prompt (para extracción simple)
+async function callGroqSimple(prompt: string, apiKey: string): Promise<string | null> {
+  try {
+    const response = await fetch(GROQ_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.1,
+        max_tokens: 100,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Error llamando a Groq:", error);
+      return null;
+    }
+
+    const data = (await response.json()) as GroqResponse;
+    return data.choices?.[0]?.message?.content || null;
+  } catch (error) {
+    console.error("Error en llamada a Groq:", error);
+    return null;
+  }
+}
+
+// Wrapper: intenta Gemini primero, luego Groq como fallback
+async function callAI(
+  systemPrompt: string,
+  conversationHistory: Array<{ role: string; text: string }>,
+  userMessage: string,
+  geminiApiKey: string,
+  groqApiKey: string
+): Promise<string | null> {
+  if (geminiApiKey) {
+    const result = await callGemini(systemPrompt, conversationHistory, userMessage, geminiApiKey);
+    if (result) return result;
+    console.warn("Gemini falló, intentando con Groq como fallback...");
+  }
+  if (groqApiKey) {
+    return await callGroq(systemPrompt, conversationHistory, userMessage, groqApiKey);
+  }
+  return null;
+}
+
+// Wrapper simple: intenta Gemini primero, luego Groq como fallback
+async function callAISimple(
+  prompt: string,
+  geminiApiKey: string,
+  groqApiKey: string
+): Promise<string | null> {
+  if (geminiApiKey) {
+    const result = await callGeminiSimple(prompt, geminiApiKey);
+    if (result) return result;
+    console.warn("Gemini simple falló, intentando con Groq como fallback...");
+  }
+  if (groqApiKey) {
+    return await callGroqSimple(prompt, groqApiKey);
+  }
+  return null;
+}
+
+// ============================================================
+// FUNCIONES EXPORTADAS
+// ============================================================
+
 // Extraer nombre usando IA
 export async function extractNameWithAI(
   userText: string,
-  apiKey: string
+  geminiApiKey: string,
+  groqApiKey: string
 ): Promise<string | null> {
   if (!userText || userText.trim().length < 2) {
     return null;
@@ -168,7 +317,7 @@ Ejemplos:
 
 Responde SOLO con el nombre extraído (capitalizado correctamente) o NO_NAME. Sin explicaciones adicionales.`;
 
-  const result = await callGeminiSimple(prompt, apiKey);
+  const result = await callAISimple(prompt, geminiApiKey, groqApiKey);
 
   if (!result) {
     return null;
@@ -220,7 +369,8 @@ export async function generateSalesResponse(
   leadInfo: LeadInfo,
   catalog: string,
   conversationHistory: Array<{ direction: string; text: string }>,
-  apiKey: string
+  geminiApiKey: string,
+  groqApiKey: string
 ): Promise<AIResponse> {
   const customerName = leadInfo.name || "cliente";
 
@@ -311,11 +461,12 @@ Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.`
     text: msg.text,
   }));
 
-  const result = await callGemini(
+  const result = await callAI(
     systemPrompt,
     formattedHistory,
     userText,
-    apiKey
+    geminiApiKey,
+    groqApiKey
   );
 
   if (!result) {
