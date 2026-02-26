@@ -10,7 +10,9 @@ const GEMINI_MODEL = "gemini-3-flash-preview";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // Configuración de Groq (fallback)
-const GROQ_MODEL = "openai/gpt-oss-20b";
+// Usamos un modelo no-reasoning para evitar respuestas con `content` vacío
+// (algunos modelos de razonamiento pueden consumir tokens en `reasoning`)
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 interface GeminiResponse {
@@ -200,7 +202,13 @@ async function callGroq(
       return null;
     }
 
-    return data.choices?.[0]?.message?.content || null;
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      console.error("Groq devolvió content vacío");
+      return null;
+    }
+
+    return content;
   } catch (error) {
     console.error("Error en llamada a Groq:", error);
     return null;
@@ -231,7 +239,13 @@ async function callGroqSimple(prompt: string, apiKey: string): Promise<string | 
     }
 
     const data = (await response.json()) as GroqResponse;
-    return data.choices?.[0]?.message?.content || null;
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      console.error("Groq simple devolvió content vacío");
+      return null;
+    }
+
+    return content;
   } catch (error) {
     console.error("Error en llamada a Groq:", error);
     return null;
