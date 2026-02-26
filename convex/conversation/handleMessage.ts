@@ -613,8 +613,10 @@ export const processMessage = internalAction({
         });
         reply = formatWhatsAppMessage(formatOrderAlreadyCompleted());
       } else {
-        // No responder - esperar intervención humana
-        reply = "";
+        // Pedido ya completado y mensaje enviado - responder con mensaje de seguimiento
+        reply = formatWhatsAppMessage(
+          `Hola ${leadInfo.name || ""}! Tu pedido ya está en proceso de entrega. 🚚\n\nSi tienes alguna duda sobre tu pedido contáctanos directamente.\n\nSi deseas hacer un *nuevo pedido*, solo dime "quiero hacer otro pedido" 😊`
+        );
       }
     }
 
