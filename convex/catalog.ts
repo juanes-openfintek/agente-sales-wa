@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalQuery, internalMutation } from "./_generated/server";
 
 // ============ PRODUCTOS (inventario_comidas_rapidas) ============
 
@@ -243,6 +243,92 @@ export const getFullCatalog = query({
       products,
       combos: combosWithItems,
     };
+  },
+});
+
+// ============ CATÁLOGO DE CAMISETAS ============
+
+// Colores compartidos por todos los tipos de camiseta
+const COLORES_CAMISETAS = [
+  "Blanco", "Negro", "Gris", "Amarillo", "Vainilla", "Nude", "Mocca",
+  "Rojo", "Azul Navy", "Azul Rey", "Azul Medio", "Verde Militar",
+  "Verde Cali", "Rosa", "Lila", "Petróleo", "Vinotinto", "Mostaza", "Terracota",
+];
+
+// Query interna: catálogo de camisetas formateado para el prompt de IA
+export const getCamisetasCatalog = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const camisetas = await ctx.db.query("camisetas").collect();
+    const activas = camisetas.filter((c) => c.activo !== false);
+
+    if (activas.length === 0) {
+      return "No hay camisetas disponibles en este momento.";
+    }
+
+    let catalog = "CAMISETAS PIEL DE DURAZNO:\n\n";
+    catalog += `📌 *REGLA DE PRECIO*:\n`;
+    catalog += `• Pedidos de 6 o más unidades → precio base por unidad\n`;
+    catalog += `• Pedidos de menos de 6 unidades → precio base + $2.000 por camiseta\n\n`;
+    catalog += `🚚 *ENVÍO*: Bogotá $10.000 | Otras ciudades: se cotiza\n\n`;
+
+    for (const c of activas) {
+      const tallasArr = JSON.parse(c.tallas) as string[];
+      const precioMenor = c.precioBase + 2000;
+      catalog += `👕 *${c.nombre}*\n`;
+      catalog += `   Precio (≥6 und): $${c.precioBase.toLocaleString()} c/u\n`;
+      catalog += `   Precio (<6 und): $${precioMenor.toLocaleString()} c/u\n`;
+      catalog += `   Tallas disponibles: ${tallasArr.join(", ")}\n\n`;
+    }
+
+    const coloresStr = COLORES_CAMISETAS.join(", ");
+    catalog += `🎨 *COLORES DISPONIBLES (aplican para todos los tipos)*:\n${coloresStr}\n`;
+
+    return catalog;
+  },
+});
+
+// Mutation pública: poblar tabla camisetas con datos iniciales del Excel
+export const seedCamisetas = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const existing = await ctx.db.query("camisetas").collect();
+    if (existing.length > 0) {
+      return { message: "La tabla camisetas ya tiene datos, no se insertó nada.", count: 0 };
+    }
+
+    const coloresJson = JSON.stringify(COLORES_CAMISETAS);
+    const tallasAdulto = JSON.stringify(["S", "M", "L", "XL"]);
+    const tallasNino = JSON.stringify(["2", "4", "6", "8", "10", "12", "14", "16"]);
+
+    await ctx.db.insert("camisetas", {
+      nombre: "Camiseta Piel de Durazno Dama",
+      tipo: "dama",
+      tallas: tallasAdulto,
+      colores: coloresJson,
+      precioBase: 11000,
+      activo: true,
+    });
+
+    await ctx.db.insert("camisetas", {
+      nombre: "Camiseta Piel de Durazno Caballero Horma Recta",
+      tipo: "caballero",
+      tallas: tallasAdulto,
+      colores: coloresJson,
+      precioBase: 12000,
+      activo: true,
+    });
+
+    await ctx.db.insert("camisetas", {
+      nombre: "Camiseta Piel de Durazno Niño",
+      tipo: "nino",
+      tallas: tallasNino,
+      colores: coloresJson,
+      precioBase: 9000,
+      activo: true,
+    });
+
+    return { message: "Camisetas insertadas correctamente.", count: 3 };
   },
 });
 

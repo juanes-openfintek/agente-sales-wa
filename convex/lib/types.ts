@@ -4,6 +4,7 @@
 
 // Estados de conversación
 export const ConversationState = {
+  SELECTING_STORE: "selecting_store",  // Nuevo: elegir entre carnes o camisetas
   COLLECTING_INFO: "collecting_info",
   BROWSING: "browsing",
   COLLECTING_DELIVERY_INFO: "collecting_delivery_info",
@@ -18,6 +19,7 @@ export type ConversationStateType = typeof ConversationState[keyof typeof Conver
 
 // Descripciones de estados
 export const STATE_DESCRIPTIONS: Record<ConversationStateType, string> = {
+  [ConversationState.SELECTING_STORE]: "Seleccionando tienda (carnes o camisetas)",
   [ConversationState.COLLECTING_INFO]: "Recolectando nombre",
   [ConversationState.BROWSING]: "Navegando catálogo / haciendo pedido",
   [ConversationState.COLLECTING_DELIVERY_INFO]: "Recolectando información de envío",
@@ -81,4 +83,5 @@ export interface LeadInfo {
   orderTotal?: number;
   completedMessageSent?: boolean;
   notifyPreference?: string;
+  storeType?: string; // "carnes" | "camisetas"
 }

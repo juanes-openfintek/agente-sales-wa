@@ -563,3 +563,160 @@ Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.`
     };
   }
 }
+
+// ============================================================
+// GENERAR RESPUESTA DE VENTAS — CAMISETAS
+// ============================================================
+export async function generateShirtSalesResponse(
+  userText: string,
+  leadInfo: LeadInfo,
+  catalog: string,
+  conversationHistory: Array<{ direction: string; text: string }>,
+  geminiApiKey: string,
+  groqApiKey: string
+): Promise<AIResponse> {
+  const customerName = leadInfo.name || "cliente";
+
+  // Construir el pedido actual si existe
+  let currentOrderContext = "";
+  if (leadInfo.orderItems) {
+    try {
+      const items = JSON.parse(leadInfo.orderItems);
+      if (Array.isArray(items) && items.length > 0) {
+        currentOrderContext = `\nPEDIDO ACTUAL DEL CLIENTE:\n${items.map((i: string) => `• ${i}`).join("\n")}\nTotal actual: $${(leadInfo.orderTotal || 0).toLocaleString()}\n`;
+      }
+    } catch {
+      // Ignorar si no es JSON válido
+    }
+  }
+
+  const systemPrompt = `Eres un asistente de ventas experto de una tienda de *Camisetas Piel de Durazno*. Vendemos camisetas al por mayor y menor para dama, caballero y niño. Tu objetivo es ayudar al cliente a elegir las camisetas que necesita y cerrar la venta.
+
+INFORMACIÓN DEL CLIENTE:
+- Nombre: ${customerName}
+- Ciudad: ${leadInfo.city || "No proporcionada"}
+- Email: ${leadInfo.email || "No proporcionado"}
+- Dirección: ${leadInfo.address || "No proporcionada"}
+- Estado actual: ${leadInfo.status}
+${currentOrderContext}
+CATÁLOGO COMPLETO:
+${catalog}
+
+REGLAS DE PRECIO (MUY IMPORTANTE):
+- Pedidos de 6 o más unidades en total → precio base por unidad (sin recargo)
+- Pedidos de menos de 6 unidades en total → precio base + $2.000 por camiseta
+- Ejemplo: 3 camisetas dama = 3 × $13.000 = $39.000 (en vez de $11.000)
+- Ejemplo: 6 camisetas niño = 6 × $9.000 = $54.000 (precio base, sin recargo)
+- SIEMPRE menciona la regla de precio cuando el cliente pregunte por cantidades menores a 6
+
+ENVÍO:
+- Bogotá: $10.000 fijo (menciónalo cuando sepas que es de Bogotá)
+- Otras ciudades: el costo de envío se cotiza; informa al cliente que lo avisarás
+- NO hay restricción de ciudad — enviamos a todo el país
+
+FLUJO DE VENTAS:
+
+1. **EXPLORACIÓN DE PRODUCTOS**:
+   - SIEMPRE usa el nombre del cliente (${customerName}) de forma natural
+   - Presenta las opciones: dama ($11.000 base), caballero ($12.000 base), niño ($9.000 base)
+   - Destaca los 19 colores disponibles y la variedad de tallas
+   - Ayuda al cliente a calcular su pedido: tipo + talla + color + cantidad
+   - Recuerda aplicar y mostrar la regla de precio según la cantidad
+
+2. **CUANDO EL CLIENTE QUIERA HACER PEDIDO**:
+   - Confirma los detalles: tipo de camiseta, talla, color, cantidad
+   - Calcula el total con la regla de precio correspondiente
+   - Incluye el envío si ya conoces la ciudad
+   - Si ya tienes toda la info del cliente, responde con action: "ready_for_checkout"
+
+REGLAS CRÍTICAS:
+- Sé profesional pero cercano y amable
+- Habla de CAMISETAS, no de carnes ni otros productos
+- NUNCA confirmes un pedido que el cliente NO haya hecho explícitamente
+- Solo usa action "ready_for_checkout" cuando el cliente EXPLÍCITAMENTE diga que quiere proceder (ej: "listo", "eso es todo", "quiero pedir eso")
+- Si solo está preguntando precios o colores, NO asumas que quiere comprar
+
+FORMATO DE MENSAJES (WhatsApp):
+- Para listas usa bullets: • Item 1
+- Para precios usa: $XX.XXX
+- Para separadores usa: ━━━━━━━━━━━━━━━━━━━━━
+- Para destacar usa: *texto* (negrita simple)
+- NO uses **texto** (doble asterisco)
+
+FORMATO DE RESPUESTA JSON (ESTRICTO - solo JSON, sin texto antes ni después):
+{
+    "reply": "Tu respuesta al cliente...",
+    "order_items": ["Camiseta Dama Negra Talla M x2 - $26.000"],
+    "total_price": 26000,
+    "action": "none"
+}
+
+VALORES VÁLIDOS PARA "action":
+- "none": Para la mayoría de interacciones
+- "ready_for_checkout": SOLO cuando el cliente dice explícitamente que quiere proceder a comprar
+
+Si no hay pedido concreto, order_items debe ser [] y total_price debe ser 0.`;
+
+  const formattedHistory = conversationHistory.map((msg) => ({
+    role: msg.direction,
+    text: msg.text,
+  }));
+
+  const result = await callAI(
+    systemPrompt,
+    formattedHistory,
+    userText,
+    geminiApiKey,
+    groqApiKey
+  );
+
+  if (!result) {
+    return {
+      reply: `Lo siento ${customerName}, tuve un problema procesando tu solicitud. ¿Podrías repetir?`,
+      action: "none",
+    };
+  }
+
+  // Parsear JSON (mismo flujo que generateSalesResponse)
+  try {
+    const cleanJson = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return { reply: cleanGeminiResponse(cleanJson), action: "none" };
+    }
+
+    let jsonStr = jsonMatch[0];
+    jsonStr = jsonStr.replace(/"([^"\\]|\\.)*"/g, (match) => {
+      return match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
+    });
+
+    const data = JSON.parse(jsonStr) as {
+      reply?: string;
+      order_items?: string[];
+      total_price?: number;
+      action?: string;
+    };
+
+    const validActions = ["none", "ready_for_checkout"];
+    const parsedAction = validActions.includes(data.action || "") ? data.action! : "none";
+
+    return {
+      reply: cleanGeminiResponse(data.reply || ""),
+      orderItems: data.order_items,
+      totalPrice: data.total_price,
+      action: parsedAction,
+    };
+  } catch (e) {
+    console.error("Error parseando JSON de camisetas:", e, "Respuesta:", result.substring(0, 300));
+
+    const replyMatch = result.match(/"reply"\s*:\s*"([\s\S]*?)(?:"\s*[,}])/);
+    if (replyMatch?.[1]) {
+      const extractedReply = replyMatch[1]
+        .replace(/\\n/g, "\n").replace(/\\r/g, "\r")
+        .replace(/\\t/g, "\t").replace(/\\"/g, '"');
+      return { reply: cleanGeminiResponse(extractedReply), action: "none" };
+    }
+
+    return { reply: cleanGeminiResponse(result), action: "none" };
+  }
+}

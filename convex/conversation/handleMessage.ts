@@ -46,8 +46,13 @@ import {
   formatReturningCustomerGreeting,
   formatModificationPrompt,
   formatValidationError,
+  formatStoreSelectionMessage,
+  formatStoreNotRecognized,
+  formatShirtWelcome,
+  formatShirtMissingFieldsPrompt,
+  formatShirtShippingInfo,
 } from "../lib/messages";
-import { extractNameWithAI, generateSalesResponse } from "../lib/ai";
+import { extractNameWithAI, generateSalesResponse, generateShirtSalesResponse } from "../lib/ai";
 
 // ============================================================
 // INTERNAL QUERIES
@@ -95,6 +100,40 @@ export const getConversationHistory = internalQuery({
       direction: e.direction,
       text: e.text,
     }));
+  },
+});
+
+export const getCamisetasCatalog = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const camisetas = await ctx.db.query("camisetas").collect();
+    const activas = camisetas.filter((c) => c.activo !== false);
+
+    if (activas.length === 0) return "No hay camisetas disponibles en este momento.";
+
+    const COLORES = [
+      "Blanco", "Negro", "Gris", "Amarillo", "Vainilla", "Nude", "Mocca",
+      "Rojo", "Azul Navy", "Azul Rey", "Azul Medio", "Verde Militar",
+      "Verde Cali", "Rosa", "Lila", "Petróleo", "Vinotinto", "Mostaza", "Terracota",
+    ];
+
+    let catalog = "CAMISETAS PIEL DE DURAZNO:\n\n";
+    catalog += `📌 *REGLA DE PRECIO*:\n`;
+    catalog += `• Pedidos de 6 o más unidades → precio base por unidad\n`;
+    catalog += `• Pedidos de menos de 6 unidades → precio base + $2.000 por camiseta\n\n`;
+    catalog += `🚚 *ENVÍO*: Bogotá $10.000 | Otras ciudades: se cotiza\n\n`;
+
+    for (const c of activas) {
+      const tallasArr = JSON.parse(c.tallas) as string[];
+      const precioMenor = c.precioBase + 2000;
+      catalog += `👕 *${c.nombre}*\n`;
+      catalog += `   Precio (≥6 und): $${c.precioBase.toLocaleString()} c/u\n`;
+      catalog += `   Precio (<6 und): $${precioMenor.toLocaleString()} c/u\n`;
+      catalog += `   Tallas: ${tallasArr.join(", ")}\n\n`;
+    }
+
+    catalog += `🎨 *COLORES (aplican para todos los tipos)*:\n${COLORES.join(", ")}\n`;
+    return catalog;
   },
 });
 
@@ -159,6 +198,7 @@ export const upsertLead = internalMutation({
     completedMessageSent: v.optional(v.boolean()),
     notifyPreference: v.optional(v.string()),
     deliveryTime: v.optional(v.string()),
+    storeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { phone, ...updates } = args;
@@ -249,21 +289,23 @@ export const processMessage = internalAction({
           address: lead.address,
           city: lead.city,
           cedula: lead.cedula,
-          status: (lead.status as ConversationStateType) || ConversationState.COLLECTING_INFO,
+          status: (lead.status as ConversationStateType) || ConversationState.SELECTING_STORE,
           paymentMethod: lead.paymentMethod,
           orderItems: lead.orderItems,
           orderTotal: lead.orderTotal,
           completedMessageSent: lead.completedMessageSent,
           notifyPreference: lead.notifyPreference,
+          storeType: lead.storeType,
         }
       : {
           phone,
-          status: ConversationState.COLLECTING_INFO,
+          status: ConversationState.SELECTING_STORE,
         };
 
     let currentState = leadInfo.status;
     let reply = "";
     let action = "none";
+    const storeType = leadInfo.storeType || "";
 
     // Auto-transiciones
     if (currentState === ConversationState.COLLECTING_INFO && leadInfo.name) {
@@ -283,20 +325,63 @@ export const processMessage = internalAction({
     }
 
     // ============================================================
-    // ESTADO: COLLECTING_INFO (Recolectando nombre)
+    // ESTADO: SELECTING_STORE (Elegir entre carnes o camisetas)
     // ============================================================
-    if (currentState === ConversationState.COLLECTING_INFO || !leadInfo.name) {
+    if (currentState === ConversationState.SELECTING_STORE || (!leadInfo.name && !storeType)) {
       const messageCount = await ctx.runQuery(
         internal.conversation.handleMessage.countIncomingMessages,
         { phone }
       );
 
       if (messageCount <= 1) {
-        // Primer mensaje - bienvenida
-        reply = formatWhatsAppMessage(formatWelcomeMessage());
+        // Primer mensaje — preguntar qué tienda
+        reply = formatWhatsAppMessage(formatStoreSelectionMessage());
         await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
           phone,
-          status: ConversationState.COLLECTING_INFO,
+          status: ConversationState.SELECTING_STORE,
+        });
+      } else {
+        const textLower = text.toLowerCase();
+        const wantsCarnes = ["carne", "carnes", "1"].some((k) => textLower.includes(k));
+        const wantsCamisetas = ["camiseta", "camisetas", "ropa", "camisa", "playera", "2"].some((k) => textLower.includes(k));
+
+        if (wantsCarnes) {
+          await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
+            phone,
+            storeType: "carnes",
+            status: ConversationState.COLLECTING_INFO,
+          });
+          reply = formatWhatsAppMessage(formatWelcomeMessage());
+          currentState = ConversationState.COLLECTING_INFO;
+        } else if (wantsCamisetas) {
+          await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
+            phone,
+            storeType: "camisetas",
+            status: ConversationState.COLLECTING_INFO,
+          });
+          reply = formatWhatsAppMessage(formatShirtWelcome());
+          currentState = ConversationState.COLLECTING_INFO;
+        } else {
+          reply = formatWhatsAppMessage(formatStoreNotRecognized());
+        }
+      }
+    }
+
+    // ============================================================
+    // ESTADO: COLLECTING_INFO (Recolectando nombre)
+    // ============================================================
+    else if (currentState === ConversationState.COLLECTING_INFO || !leadInfo.name) {
+      const messageCount = await ctx.runQuery(
+        internal.conversation.handleMessage.countIncomingMessages,
+        { phone }
+      );
+
+      if (messageCount <= 1) {
+        // No debería pasar (el primer mensaje lo maneja SELECTING_STORE), pero por seguridad
+        reply = formatWhatsAppMessage(formatStoreSelectionMessage());
+        await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
+          phone,
+          status: ConversationState.SELECTING_STORE,
         });
       } else if (isOrderIntent(text)) {
         // Quiere pedir pero no dio nombre
@@ -352,23 +437,20 @@ export const processMessage = internalAction({
 
       // Usar IA para generar respuesta de ventas (Gemini primario, Groq como fallback)
       if (geminiApiKey || groqApiKey) {
-        const catalog = await ctx.runQuery(
-          internal.conversation.handleMessage.getCatalog,
-          {}
-        );
+        // Cargar catálogo según la tienda elegida
+        const catalog = storeType === "camisetas"
+          ? await ctx.runQuery(internal.conversation.handleMessage.getCamisetasCatalog, {})
+          : await ctx.runQuery(internal.conversation.handleMessage.getCatalog, {});
+
         const history = await ctx.runQuery(
           internal.conversation.handleMessage.getConversationHistory,
           { phone, limit: 10 }
         );
 
-        const aiResponse = await generateSalesResponse(
-          text,
-          leadInfo,
-          catalog,
-          history,
-          geminiApiKey,
-          groqApiKey
-        );
+        // Llamar al agente de IA correspondiente
+        const aiResponse = storeType === "camisetas"
+          ? await generateShirtSalesResponse(text, leadInfo, catalog, history, geminiApiKey, groqApiKey)
+          : await generateSalesResponse(text, leadInfo, catalog, history, geminiApiKey, groqApiKey);
 
         reply = formatWhatsAppMessage(aiResponse.reply);
         action = aiResponse.action;
@@ -447,26 +529,39 @@ export const processMessage = internalAction({
       Object.assign(leadInfo, merged);
 
       if (hasDeliveryInfo(leadInfo)) {
-        // Validar ciudad
-        const cityLower = (leadInfo.city || "").toLowerCase();
-        if (!VALID_CITIES.includes(cityLower)) {
-          reply = formatWhatsAppMessage(formatCityNotAvailable(leadInfo.city || ""));
-          await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
-            phone,
-            status: ConversationState.BROWSING,
-          });
-          currentState = ConversationState.BROWSING;
-        } else {
+        if (storeType === "camisetas") {
+          // Camisetas: cualquier ciudad es válida, agregar info de envío
+          const shippingInfo = formatShirtShippingInfo(leadInfo.city || "");
           await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
             phone,
             status: ConversationState.CONFIRMING_ORDER,
-            deliveryTime: "24 horas",
           });
-          reply = formatWhatsAppMessage(formatOrderConfirmation("Tu pedido está listo para confirmar."));
+          reply = formatWhatsAppMessage(formatOrderConfirmation(`Tu pedido está listo para confirmar.\n\n${shippingInfo}`));
           currentState = ConversationState.CONFIRMING_ORDER;
+        } else {
+          // Carnes: validar que la ciudad sea Bogotá o Cali
+          const cityLower = (leadInfo.city || "").toLowerCase();
+          if (!VALID_CITIES.includes(cityLower)) {
+            reply = formatWhatsAppMessage(formatCityNotAvailable(leadInfo.city || ""));
+            await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
+              phone,
+              status: ConversationState.BROWSING,
+            });
+            currentState = ConversationState.BROWSING;
+          } else {
+            await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
+              phone,
+              status: ConversationState.CONFIRMING_ORDER,
+              deliveryTime: "24 horas",
+            });
+            reply = formatWhatsAppMessage(formatOrderConfirmation("Tu pedido está listo para confirmar."));
+            currentState = ConversationState.CONFIRMING_ORDER;
+          }
         }
       } else {
-        const { prompt } = formatMissingFieldsPrompt(leadInfo);
+        const { prompt } = storeType === "camisetas"
+          ? formatShirtMissingFieldsPrompt(leadInfo)
+          : formatMissingFieldsPrompt(leadInfo);
         reply = formatWhatsAppMessage(prompt);
       }
     }
@@ -590,23 +685,19 @@ export const processMessage = internalAction({
     // ============================================================
     else if (currentState === ConversationState.PAYMENT_COMPLETED) {
       if (isNewOrderRequest(text)) {
+        // Siempre volver a preguntar la tienda (preguntar siempre = true)
         await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
           phone,
-          status: ConversationState.BROWSING,
+          status: ConversationState.SELECTING_STORE,
+          storeType: undefined,
           paymentMethod: undefined,
           orderItems: undefined,
           orderTotal: undefined,
           completedMessageSent: undefined,
         });
 
-        if (leadInfo.name) {
-          reply = formatWhatsAppMessage(
-            formatReturningCustomerGreeting(leadInfo.name, leadInfo.address)
-          );
-        } else {
-          reply = formatWhatsAppMessage(formatNewOrderPrompt());
-        }
-        currentState = ConversationState.BROWSING;
+        reply = formatWhatsAppMessage(formatStoreSelectionMessage());
+        currentState = ConversationState.SELECTING_STORE;
       } else if (!leadInfo.completedMessageSent) {
         await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
           phone,
@@ -624,7 +715,7 @@ export const processMessage = internalAction({
     // ============================================================
     // FALLBACK
     // ============================================================
-    if (!reply && currentState !== ConversationState.PAYMENT_COMPLETED) {
+    if (!reply && currentState !== ConversationState.PAYMENT_COMPLETED && currentState !== ConversationState.SELECTING_STORE) {
       reply = formatWhatsAppMessage(
         "Lo siento, no entendí tu mensaje. ¿Podrías repetirlo de otra forma?"
       );

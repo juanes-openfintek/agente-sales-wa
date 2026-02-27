@@ -35,6 +35,8 @@ export default defineSchema({
     totalOrders: v.optional(v.number()),
     // Flag para evitar respuestas repetitivas en estado completado
     completedMessageSent: v.optional(v.boolean()),
+    // Tienda seleccionada en la conversación actual
+    storeType: v.optional(v.string()), // "carnes" | "camisetas"
     // Timestamps
     createdAt: v.optional(v.number()),
     updatedAt: v.optional(v.number()),
@@ -148,6 +150,18 @@ export default defineSchema({
   })
     .index("by_phone", ["phone"])
     .index("by_phone_direction", ["phone", "direction"]),
+
+  // ============================================================
+  // CAMISETAS (Catálogo de camisetas Piel de Durazno)
+  // ============================================================
+  camisetas: defineTable({
+    nombre: v.string(),            // "Camiseta Piel de Durazno Dama"
+    tipo: v.string(),              // "dama" | "caballero" | "nino"
+    tallas: v.string(),            // JSON: ["S","M","L","XL"] o ["2","4","6","8","10","12","14","16"]
+    colores: v.string(),           // JSON: array de colores disponibles
+    precioBase: v.number(),        // Precio para pedidos >= 6 unidades
+    activo: v.optional(v.boolean()),
+  }).index("by_tipo", ["tipo"]),
 
   // ============================================================
   // INVENTARIO (Productos)

@@ -241,3 +241,79 @@ export function formatAddressSelected(address: string): string {
 export function formatValidationError(field: string, error?: string): string {
   return `El ${field} no es válido. ${error || "Por favor, verifica e intenta de nuevo."}`;
 }
+
+// ============================================================
+// MENSAJES DE SELECCIÓN DE TIENDA
+// ============================================================
+
+// Primer mensaje: bienvenida + pregunta de tienda
+export function formatStoreSelectionMessage(): string {
+  return `👋 ¡Bienvenido!
+
+Somos una empresa con dos líneas de productos. ¿Por cuál de nuestras tiendas vienes hoy?
+
+${SEPARATOR}
+🥩 *1. Carnes* — Distribuidora de carnes finas al por mayor y menor
+👕 *2. Camisetas* — Camisetas Piel de Durazno (dama, caballero y niño)
+${SEPARATOR}
+
+Responde *carnes* o *camisetas* para continuar.`;
+}
+
+// Tienda no reconocida
+export function formatStoreNotRecognized(): string {
+  return `No entendí tu respuesta. 😊
+
+Por favor responde *carnes* si vienes por carnes, o *camisetas* si vienes por camisetas.`;
+}
+
+// Bienvenida tras elegir camisetas
+export function formatShirtWelcome(name?: string): string {
+  if (name) {
+    return `¡Perfecto, *${name}*! Bienvenido a nuestra tienda de *Camisetas Piel de Durazno*. 👕
+
+Tenemos camisetas para dama, caballero y niño en una amplia variedad de colores y tallas.
+
+¿Qué tipo de camiseta buscas o quieres ver el catálogo completo?`;
+  }
+  return `¡Excelente elección! 👕 Bienvenido a nuestra tienda de *Camisetas Piel de Durazno*.
+
+Para empezar, ¿cuál es tu nombre?
+
+📝 *Ejemplo:* María`;
+}
+
+// Datos faltantes para envío de camisetas (sin restricción de ciudad)
+export function formatShirtMissingFieldsPrompt(leadInfo: {
+  city?: string;
+  address?: string;
+  email?: string;
+}): { missing: string[]; prompt: string } {
+  const missing: string[] = [];
+
+  if (!leadInfo.city) missing.push("ciudad de entrega");
+  if (!leadInfo.address) missing.push("dirección de entrega");
+  if (!leadInfo.email) missing.push("correo electrónico");
+
+  if (missing.length === 0) {
+    return { missing: [], prompt: "" };
+  }
+
+  const prompt = `Para completar tu pedido necesito los siguientes datos:
+
+${missing.map((field, i) => `${i + 1}. ${field.charAt(0).toUpperCase() + field.slice(1)}`).join("\n")}
+
+Por favor, envíalos en un solo mensaje. Por ejemplo:
+_Bogotá, Calle 123 #45-67, tucorreo@email.com_`;
+
+  return { missing, prompt };
+}
+
+// Info de envío para camisetas según ciudad
+export function formatShirtShippingInfo(city: string): string {
+  const cityLower = city.toLowerCase();
+  if (cityLower.includes("bogot")) {
+    return `🚚 *Envío a Bogotá:* $10.000`;
+  }
+  return `🚚 *Envío a ${city}:* Se cotizará y te informaremos el costo antes de confirmar.`;
+}
