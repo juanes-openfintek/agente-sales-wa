@@ -22,6 +22,7 @@ import {
   isModificationRequest,
   hasDeliveryInfo,
   mergeDeliveryInfo,
+  isLikelyNotAName,
 } from "../lib/validation";
 import {
   formatWhatsAppMessage,
@@ -309,7 +310,7 @@ export const processMessage = internalAction({
         }
 
         // Fallback a validación simple si no hay IA
-        if (!extractedName) {
+        if (!extractedName && !isLikelyNotAName(text)) {
           const cleanText = text.trim();
           const validation = validateName(cleanText);
           if (validation.isValid && cleanText.split(" ").length <= 4) {

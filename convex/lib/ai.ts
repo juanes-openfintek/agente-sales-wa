@@ -152,7 +152,9 @@ async function callGeminiSimple(prompt: string, apiKey: string): Promise<string 
 // GROQ API (Fallback)
 // ============================================================
 
-// Llamar a Groq API con historial de chat (usa formato OpenAI-compatible)
+// Llamar a Groq API con historial de chat
+// Misma arquitectura de contexto que Gemini: system prompt + historial + mensaje actual
+// empaquetados de forma idéntica para consistencia en las respuestas
 async function callGroq(
   systemPrompt: string,
   conversationHistory: Array<{ role: string; text: string }>,
@@ -160,20 +162,21 @@ async function callGroq(
   apiKey: string
 ): Promise<string | null> {
   try {
-    const messages: Array<{ role: string; content: string }> = [
-      { role: "system", content: systemPrompt },
-    ];
+    // Construir contexto idéntico a callGemini: system + historial en un bloque
+    let systemContext = systemPrompt;
 
-    // Agregar historial de conversación con roles correctos
-    for (const msg of conversationHistory) {
-      messages.push({
-        role: msg.role === "in" ? "user" : "assistant",
-        content: msg.text,
-      });
+    if (conversationHistory.length > 0) {
+      systemContext += "\n\nHISTORIAL DE LA CONVERSACIÓN RECIENTE:\n";
+      for (const msg of conversationHistory) {
+        const role = msg.role === "in" ? "Cliente" : "Asistente";
+        systemContext += `${role}: ${msg.text}\n`;
+      }
     }
 
-    // Mensaje actual del usuario
-    messages.push({ role: "user", content: userMessage });
+    const messages: Array<{ role: string; content: string }> = [
+      { role: "system", content: systemContext },
+      { role: "user", content: "MENSAJE ACTUAL DEL CLIENTE:\n\"" + userMessage + "\"" },
+    ];
 
     const response = await fetch(GROQ_API_URL, {
       method: "POST",
@@ -186,6 +189,7 @@ async function callGroq(
         messages,
         temperature: 0.4,
         max_tokens: 2048,
+        top_p: 0.8,
       }),
     });
 

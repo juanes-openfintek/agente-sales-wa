@@ -4,6 +4,32 @@
 
 import { VALID_CITIES } from "./types";
 
+// Palabras que NUNCA son un nombre de persona
+const NON_NAME_WORDS = new Set([
+  // Saludos
+  "hola", "hello", "hi", "hey", "alo", "aló", "buenas", "buenos",
+  // Saludos con tiempo
+  "buen", "buendia", "buendía",
+  // Respuestas cortas
+  "si", "sí", "no", "ok", "okay", "okey", "dale", "listo", "claro", "bien",
+  "mal", "regular", "gracias", "porfa", "perfecto", "exacto", "correcto",
+  // Preguntas / conectores
+  "que", "qué", "como", "cómo", "cuando", "cuándo", "donde", "dónde",
+  "quien", "quién", "cual", "cuál", "para", "con", "por", "favor",
+  // Palabras de chat
+  "jaja", "jeje", "xd", "lol", "oke", "va", "ya", "ah", "oh", "uh",
+  // Expresiones
+  "genial", "excelente", "super", "súper", "chévere", "chevere",
+]);
+
+// Verifica si un texto es claramente un saludo/palabra común y no un nombre
+export function isLikelyNotAName(text: string): boolean {
+  const lower = text.trim().toLowerCase();
+  // Si cada palabra del texto está en el blocklist, no es un nombre
+  const words = lower.split(/\s+/);
+  return words.every((w) => NON_NAME_WORDS.has(w));
+}
+
 // Validar nombre
 export function validateName(name: string): { isValid: boolean; error?: string } {
   if (!name || name.trim().length < 2) {
@@ -15,6 +41,10 @@ export function validateName(name: string): { isValid: boolean; error?: string }
   // Rechazar si parece ser solo números o caracteres especiales
   if (/^[\d\s\W]+$/.test(name)) {
     return { isValid: false, error: "El nombre no parece válido" };
+  }
+  // Rechazar saludos y palabras comunes que no son nombres
+  if (isLikelyNotAName(name)) {
+    return { isValid: false, error: "Eso no parece un nombre" };
   }
   return { isValid: true };
 }
