@@ -364,6 +364,97 @@ Responde SOLO con el nombre extraído (capitalizado correctamente) o NO_NAME. Si
     .join(" ");
 }
 
+// Limpiar prefijos de "pensamiento" que algunos modelos agregan (ej: Gemini flash)
+// Patrones comunes: "thought{...}\n{json}", "<think>...</think>{json}", etc.
+function stripThinkingPrefix(text: string): string {
+  // Eliminar bloques "thought{...}" o "thought {...}" al inicio
+  text = text.replace(/^thought\s*\{[\s\S]*?\}\s*/i, "");
+  // Eliminar bloques <think>...</think> al inicio
+  text = text.replace(/^<think>[\s\S]*?<\/think>\s*/i, "");
+  return text;
+}
+
+// Extraer el reply de una respuesta de IA, sin importar si es JSON válido o no.
+// Maneja: JSON completo, JSON truncado, JSON con errores, o texto plano.
+function extractReplyFromAIResponse(raw: string): AIResponse {
+  // 1. Limpiar markdown code blocks y thinking prefixes
+  let text = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  text = stripThinkingPrefix(text);
+
+  // 2. Intentar parsear como JSON completo
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      let jsonStr = jsonMatch[0];
+      // Escapar newlines dentro de strings JSON
+      jsonStr = jsonStr.replace(/"([^"\\]|\\.)*"/g, (match) => {
+        return match
+          .replace(/\n/g, "\\n")
+          .replace(/\r/g, "\\r")
+          .replace(/\t/g, "\\t");
+      });
+
+      const data = JSON.parse(jsonStr) as {
+        reply?: string;
+        order_items?: string[];
+        total_price?: number;
+        action?: string;
+      };
+
+      if (data.reply) {
+        const validActions = ["none", "ready_for_checkout"];
+        return {
+          reply: cleanGeminiResponse(data.reply),
+          orderItems: data.order_items,
+          totalPrice: data.total_price,
+          action: validActions.includes(data.action || "") ? data.action! : "none",
+        };
+      }
+    }
+  } catch {
+    // JSON parsing falló — seguimos intentando
+  }
+
+  // 3. Extraer reply con regex (funciona con JSON truncado/roto)
+  // Buscar "reply": "..." incluso si el JSON está incompleto
+  const replyMatch = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)(")?/);
+  if (replyMatch && replyMatch[1]) {
+    let extracted = replyMatch[1]
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"');
+    return {
+      reply: cleanGeminiResponse(extracted),
+      action: "none",
+    };
+  }
+
+  // 4. Último fallback: si el texto parece JSON crudo, limpiar las llaves y keys
+  // Esto cubre el caso donde sale { "reply": "texto... sin cerrar
+  let cleaned = text;
+  // Quitar { al inicio y } al final si existen
+  cleaned = cleaned.replace(/^\s*\{?\s*"reply"\s*:\s*"?/, "");
+  // Quitar trailing JSON artifacts
+  cleaned = cleaned.replace(/",?\s*"order_items"[\s\S]*$/, "");
+  cleaned = cleaned.replace(/",?\s*"action"[\s\S]*$/, "");
+  cleaned = cleaned.replace(/"\s*\}\s*$/, "");
+
+  if (cleaned && cleaned !== text) {
+    // Pudimos extraer algo del JSON roto
+    return {
+      reply: cleanGeminiResponse(cleaned.replace(/\\n/g, "\n").replace(/\\"/g, '"')),
+      action: "none",
+    };
+  }
+
+  // 5. Si nada funcionó, devolver el texto limpio (sin JSON artifacts)
+  return {
+    reply: cleanGeminiResponse(text),
+    action: "none",
+  };
+}
+
 // Limpiar respuesta de Gemini para WhatsApp
 function cleanGeminiResponse(text: string): string {
   // Convertir **texto** a *texto* (formato WhatsApp)
@@ -494,74 +585,7 @@ Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.`
     };
   }
 
-  // Intentar parsear como JSON
-  try {
-    const cleanJson = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-
-    // Buscar el JSON en la respuesta (a veces Gemini agrega texto antes/después)
-    const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("No se encontró JSON en la respuesta de Gemini:", cleanJson.substring(0, 200));
-      return {
-        reply: cleanGeminiResponse(cleanJson),
-        action: "none",
-      };
-    }
-
-    // Escapar saltos de línea dentro de strings JSON para evitar errores de parsing
-    // Esto reemplaza newlines literales dentro de valores de string con \n escapado
-    let jsonStr = jsonMatch[0];
-
-    // Estrategia: reemplazar newlines dentro de strings JSON
-    // Buscar contenido entre comillas y escapar newlines
-    jsonStr = jsonStr.replace(/"([^"\\]|\\.)*"/g, (match) => {
-      return match
-        .replace(/\n/g, "\\n")
-        .replace(/\r/g, "\\r")
-        .replace(/\t/g, "\\t");
-    });
-
-    const data = JSON.parse(jsonStr) as {
-      reply?: string;
-      order_items?: string[];
-      total_price?: number;
-      action?: string;
-    };
-
-    // Validar que la acción sea válida
-    const validActions = ["none", "ready_for_checkout"];
-    const parsedAction = validActions.includes(data.action || "") ? data.action! : "none";
-
-    return {
-      reply: cleanGeminiResponse(data.reply || ""),
-      orderItems: data.order_items,
-      totalPrice: data.total_price,
-      action: parsedAction,
-    };
-  } catch (e) {
-    console.error("Error parseando JSON de Gemini:", e, "Respuesta:", result.substring(0, 300));
-
-    // Intentar extraer el reply manualmente si el JSON falla
-    const replyMatch = result.match(/"reply"\s*:\s*"([\s\S]*?)(?:"\s*[,}])/);
-    if (replyMatch && replyMatch[1]) {
-      // Decodificar escapes básicos
-      const extractedReply = replyMatch[1]
-        .replace(/\\n/g, "\n")
-        .replace(/\\r/g, "\r")
-        .replace(/\\t/g, "\t")
-        .replace(/\\"/g, '"');
-      return {
-        reply: cleanGeminiResponse(extractedReply),
-        action: "none",
-      };
-    }
-
-    // Si no es JSON, usar el texto directamente
-    return {
-      reply: cleanGeminiResponse(result),
-      action: "none",
-    };
-  }
+  return extractReplyFromAIResponse(result);
 }
 
 // ============================================================
@@ -602,11 +626,26 @@ ${currentOrderContext}
 CATÁLOGO COMPLETO:
 ${catalog}
 
-REGLAS DE PRECIO (MUY IMPORTANTE):
-- Pedidos de 6 o más unidades en total → precio base por unidad (sin recargo)
-- Pedidos de menos de 6 unidades en total → precio base + $2.000 por camiseta
-- Ejemplo: 3 camisetas dama = 3 × $13.000 = $39.000 (en vez de $11.000)
-- Ejemplo: 6 camisetas niño = 6 × $9.000 = $54.000 (precio base, sin recargo)
+REGLAS DE PRECIO (MUY IMPORTANTE — lee con atención):
+- Lo que determina si hay recargo o no es el TOTAL DE UNIDADES del pedido completo (sumando todos los tipos)
+- Si el total de unidades es 6 o más → cada camiseta se cobra al PRECIO BASE de su tipo
+- Si el total de unidades es menos de 6 → cada camiseta se cobra al PRECIO BASE + $2.000
+
+PRECIOS BASE por tipo:
+- Dama: $11.000 | Con recargo (<6 und): $13.000
+- Caballero: $12.000 | Con recargo (<6 und): $14.000
+- Niño: $9.000 | Con recargo (<6 und): $11.000
+
+EJEMPLOS DE CÁLCULO:
+- 3 Dama + 3 Caballero = 6 unidades total → SIN recargo → 3×$11.000 + 3×$12.000 = $69.000
+- 2 Dama + 2 Niño = 4 unidades total → CON recargo → 2×$13.000 + 2×$11.000 = $48.000
+- 3 Caballero + 3 Dama = 6 unidades total → SIN recargo → 3×$12.000 + 3×$11.000 = $69.000
+- 2 Caballero = 2 unidades total → CON recargo → 2×$14.000 = $28.000
+
+CUANDO MUESTRES EL RESUMEN DEL PEDIDO:
+- Muestra el precio unitario que REALMENTE aplica (ya con recargo incluido si corresponde)
+- NO muestres "precio base + recargo" por separado, solo muestra el precio final por unidad
+- Menciona brevemente si aplica o no el recargo y por qué (ej: "Como son menos de 6 unidades, aplica un recargo de $2.000 por camiseta")
 - SIEMPRE menciona la regla de precio cuando el cliente pregunte por cantidades menores a 6
 
 ENVÍO:
@@ -632,6 +671,7 @@ FLUJO DE VENTAS:
 REGLAS CRÍTICAS:
 - Sé profesional pero cercano y amable
 - Habla de CAMISETAS, no de carnes ni otros productos
+- NUNCA digas que no hay stock, que no hay disponibilidad o que no hay camisetas. SIEMPRE tenemos camisetas disponibles. El inventario lo manejamos nosotros internamente — tú solo vendes
 - NUNCA confirmes un pedido que el cliente NO haya hecho explícitamente
 - Solo usa action "ready_for_checkout" cuando el cliente EXPLÍCITAMENTE diga que quiere proceder (ej: "listo", "eso es todo", "quiero pedir eso")
 - Si solo está preguntando precios o colores, NO asumas que quiere comprar
@@ -677,46 +717,5 @@ Si no hay pedido concreto, order_items debe ser [] y total_price debe ser 0.`;
     };
   }
 
-  // Parsear JSON (mismo flujo que generateSalesResponse)
-  try {
-    const cleanJson = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const jsonMatch = cleanJson.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return { reply: cleanGeminiResponse(cleanJson), action: "none" };
-    }
-
-    let jsonStr = jsonMatch[0];
-    jsonStr = jsonStr.replace(/"([^"\\]|\\.)*"/g, (match) => {
-      return match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
-    });
-
-    const data = JSON.parse(jsonStr) as {
-      reply?: string;
-      order_items?: string[];
-      total_price?: number;
-      action?: string;
-    };
-
-    const validActions = ["none", "ready_for_checkout"];
-    const parsedAction = validActions.includes(data.action || "") ? data.action! : "none";
-
-    return {
-      reply: cleanGeminiResponse(data.reply || ""),
-      orderItems: data.order_items,
-      totalPrice: data.total_price,
-      action: parsedAction,
-    };
-  } catch (e) {
-    console.error("Error parseando JSON de camisetas:", e, "Respuesta:", result.substring(0, 300));
-
-    const replyMatch = result.match(/"reply"\s*:\s*"([\s\S]*?)(?:"\s*[,}])/);
-    if (replyMatch?.[1]) {
-      const extractedReply = replyMatch[1]
-        .replace(/\\n/g, "\n").replace(/\\r/g, "\r")
-        .replace(/\\t/g, "\t").replace(/\\"/g, '"');
-      return { reply: cleanGeminiResponse(extractedReply), action: "none" };
-    }
-
-    return { reply: cleanGeminiResponse(result), action: "none" };
-  }
+  return extractReplyFromAIResponse(result);
 }

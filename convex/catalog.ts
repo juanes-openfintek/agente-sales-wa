@@ -262,11 +262,30 @@ export const getCamisetasCatalog = internalQuery({
     const camisetas = await ctx.db.query("camisetas").collect();
     const activas = camisetas.filter((c) => c.activo !== false);
 
-    if (activas.length === 0) {
-      return "No hay camisetas disponibles en este momento.";
-    }
-
     let catalog = "CAMISETAS PIEL DE DURAZNO:\n\n";
+
+    // Si la tabla está vacía, usar catálogo por defecto (el inventario lo manejamos nosotros)
+    if (activas.length === 0) {
+      catalog += `📌 *REGLA DE PRECIO*:\n`;
+      catalog += `• Pedidos de 6 o más unidades → precio base por unidad\n`;
+      catalog += `• Pedidos de menos de 6 unidades → precio base + $2.000 por camiseta\n\n`;
+      catalog += `🚚 *ENVÍO*: Bogotá $10.000 | Otras ciudades: se cotiza\n\n`;
+      catalog += `👕 *Camiseta Piel de Durazno Dama*\n`;
+      catalog += `   Precio (≥6 und): $11.000 c/u\n`;
+      catalog += `   Precio (<6 und): $13.000 c/u\n`;
+      catalog += `   Tallas disponibles: S, M, L, XL\n\n`;
+      catalog += `👕 *Camiseta Piel de Durazno Caballero Horma Recta*\n`;
+      catalog += `   Precio (≥6 und): $12.000 c/u\n`;
+      catalog += `   Precio (<6 und): $14.000 c/u\n`;
+      catalog += `   Tallas disponibles: S, M, L, XL\n\n`;
+      catalog += `👕 *Camiseta Piel de Durazno Niño*\n`;
+      catalog += `   Precio (≥6 und): $9.000 c/u\n`;
+      catalog += `   Precio (<6 und): $11.000 c/u\n`;
+      catalog += `   Tallas disponibles: 2, 4, 6, 8, 10, 12, 14, 16\n\n`;
+      const coloresStr = COLORES_CAMISETAS.join(", ");
+      catalog += `🎨 *COLORES DISPONIBLES (aplican para todos los tipos)*:\n${coloresStr}\n`;
+      return catalog;
+    }
     catalog += `📌 *REGLA DE PRECIO*:\n`;
     catalog += `• Pedidos de 6 o más unidades → precio base por unidad\n`;
     catalog += `• Pedidos de menos de 6 unidades → precio base + $2.000 por camiseta\n\n`;
