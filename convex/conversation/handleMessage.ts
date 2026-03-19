@@ -28,9 +28,6 @@ import {
   formatWhatsAppMessage,
   formatWelcomeMessage,
   formatNameCaptured,
-  formatAskNameAgain,
-  formatNameWithOrderIntent,
-  formatMissingFieldsPrompt,
   formatCedulaRequest,
   formatCedulaInvalid,
   formatOrderConfirmation,
@@ -49,10 +46,21 @@ import {
   formatStoreSelectionMessage,
   formatStoreNotRecognized,
   formatShirtWelcome,
-  formatShirtMissingFieldsPrompt,
   formatShirtShippingInfo,
 } from "../lib/messages";
 import { extractNameWithAI, generateSalesResponse, generateShirtSalesResponse } from "../lib/ai";
+import {
+  countDeliveryPrompts,
+  countNamePrompts,
+  extractProfileName,
+  getNewDeliveryFields,
+  isFrustrationMessage,
+} from "../lib/conversationSignals";
+import {
+  formatAskNameAgainSmart,
+  formatSmartDeliveryPrompt,
+  formatUsingProfileName,
+} from "../lib/smartMessages";
 
 // ============================================================
 // INTERNAL QUERIES
@@ -280,6 +288,10 @@ export const processMessage = internalAction({
 
     // Obtener info del lead
     const lead = await ctx.runQuery(internal.conversation.handleMessage.getLeadByPhone, { phone });
+    const recentHistory = await ctx.runQuery(
+      internal.conversation.handleMessage.getConversationHistory,
+      { phone, limit: 12 }
+    );
 
     const leadInfo: LeadInfo = lead
       ? {
@@ -306,6 +318,10 @@ export const processMessage = internalAction({
     let reply = "";
     let action = "none";
     const storeType = leadInfo.storeType || "";
+    const namePromptCount = countNamePrompts(recentHistory);
+    const deliveryPromptCount = countDeliveryPrompts(recentHistory);
+    const userIsFrustrated = isFrustrationMessage(text);
+    const profileName = extractProfileName(pushName);
 
     // Auto-transiciones
     if (currentState === ConversationState.COLLECTING_INFO && leadInfo.name) {
@@ -332,8 +348,10 @@ export const processMessage = internalAction({
         internal.conversation.handleMessage.countIncomingMessages,
         { phone }
       );
+      const wantsCarnes = ["carne", "carnes", "1"].some((k) => text.toLowerCase().includes(k));
+      const wantsCamisetas = ["camiseta", "camisetas", "ropa", "camisa", "playera", "2"].some((k) => text.toLowerCase().includes(k));
 
-      if (messageCount <= 1) {
+      if (messageCount <= 1 && !wantsCarnes && !wantsCamisetas) {
         // Primer mensaje — preguntar qué tienda
         reply = formatWhatsAppMessage(formatStoreSelectionMessage());
         await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
@@ -383,9 +401,6 @@ export const processMessage = internalAction({
           phone,
           status: ConversationState.SELECTING_STORE,
         });
-      } else if (isOrderIntent(text)) {
-        // Quiere pedir pero no dio nombre
-        reply = formatWhatsAppMessage(formatNameWithOrderIntent());
       } else {
         // Intentar extraer nombre con IA
         let extractedName: string | null = null;
@@ -403,16 +418,36 @@ export const processMessage = internalAction({
           }
         }
 
-        if (extractedName) {
+        const shouldUseProfileName =
+          !extractedName &&
+          !!profileName &&
+          (
+            userIsFrustrated ||
+            namePromptCount >= 2 ||
+            isOrderIntent(text) ||
+            ["si", "sÃ­", "ok", "dale", "listo"].some((value) => text.toLowerCase().includes(value))
+          );
+
+        if (extractedName || shouldUseProfileName) {
+          const finalName = extractedName || profileName!;
           await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
             phone,
-            name: extractedName,
+            name: finalName,
             status: ConversationState.BROWSING,
           });
-          reply = formatWhatsAppMessage(formatNameCaptured(extractedName));
+          reply = formatWhatsAppMessage(
+            extractedName
+              ? formatNameCaptured(finalName)
+              : formatUsingProfileName(finalName, storeType === "camisetas" ? "camisetas" : "carnes")
+          );
           currentState = ConversationState.BROWSING;
         } else {
-          reply = formatWhatsAppMessage(formatAskNameAgain());
+          reply = formatWhatsAppMessage(
+            formatAskNameAgainSmart({
+              apology: userIsFrustrated || namePromptCount > 0,
+              profileNameSuggestion: profileName || undefined,
+            })
+          );
         }
       }
     }
@@ -423,7 +458,9 @@ export const processMessage = internalAction({
     else if (currentState === ConversationState.BROWSING) {
       // Intentar extraer datos de envío mientras navega
       if (!hasDeliveryInfo(leadInfo)) {
-        const merged = mergeDeliveryInfo(text, leadInfo);
+        const merged = mergeDeliveryInfo(text, leadInfo, {
+          allowAnyCity: storeType === "camisetas",
+        });
         if (merged.city || merged.address || merged.email) {
           await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
             phone,
@@ -442,15 +479,10 @@ export const processMessage = internalAction({
           ? await ctx.runQuery(internal.conversation.handleMessage.getCamisetasCatalog, {})
           : await ctx.runQuery(internal.conversation.handleMessage.getCatalog, {});
 
-        const history = await ctx.runQuery(
-          internal.conversation.handleMessage.getConversationHistory,
-          { phone, limit: 10 }
-        );
-
         // Llamar al agente de IA correspondiente
         const aiResponse = storeType === "camisetas"
-          ? await generateShirtSalesResponse(text, leadInfo, catalog, history, geminiApiKey, groqApiKey)
-          : await generateSalesResponse(text, leadInfo, catalog, history, geminiApiKey, groqApiKey);
+          ? await generateShirtSalesResponse(text, leadInfo, catalog, recentHistory, geminiApiKey, groqApiKey)
+          : await generateSalesResponse(text, leadInfo, catalog, recentHistory, geminiApiKey, groqApiKey);
 
         reply = formatWhatsAppMessage(aiResponse.reply);
         action = aiResponse.action;
@@ -478,7 +510,11 @@ export const processMessage = internalAction({
               phone,
               status: ConversationState.COLLECTING_DELIVERY_INFO,
             });
-            const { prompt } = formatMissingFieldsPrompt(leadInfo);
+            const { prompt } = formatSmartDeliveryPrompt(
+              leadInfo,
+              storeType === "camisetas" ? "camisetas" : "carnes",
+              { apology: userIsFrustrated || deliveryPromptCount > 0 }
+            );
             reply = formatWhatsAppMessage(`${aiResponse.reply}\n\n${prompt}`);
             currentState = ConversationState.COLLECTING_DELIVERY_INFO;
           }
@@ -501,7 +537,11 @@ export const processMessage = internalAction({
               phone,
               status: ConversationState.COLLECTING_DELIVERY_INFO,
             });
-            const { prompt } = formatMissingFieldsPrompt(leadInfo);
+            const { prompt } = formatSmartDeliveryPrompt(
+              leadInfo,
+              storeType === "camisetas" ? "camisetas" : "carnes",
+              { apology: userIsFrustrated || deliveryPromptCount > 0 }
+            );
             reply = formatWhatsAppMessage(`Perfecto, tomé tu pedido.\n\n${prompt}`);
             currentState = ConversationState.COLLECTING_DELIVERY_INFO;
           }
@@ -517,7 +557,15 @@ export const processMessage = internalAction({
     // ESTADO: COLLECTING_DELIVERY_INFO
     // ============================================================
     else if (currentState === ConversationState.COLLECTING_DELIVERY_INFO) {
-      const merged = mergeDeliveryInfo(text, leadInfo);
+      const deliveryBefore = {
+        city: leadInfo.city,
+        address: leadInfo.address,
+        email: leadInfo.email,
+      };
+      const merged = mergeDeliveryInfo(text, leadInfo, {
+        allowAnyCity: storeType === "camisetas",
+      });
+      const capturedNow = getNewDeliveryFields(deliveryBefore, merged);
 
       await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
         phone,
@@ -559,9 +607,14 @@ export const processMessage = internalAction({
           }
         }
       } else {
-        const { prompt } = storeType === "camisetas"
-          ? formatShirtMissingFieldsPrompt(leadInfo)
-          : formatMissingFieldsPrompt(leadInfo);
+        const { prompt } = formatSmartDeliveryPrompt(
+          leadInfo,
+          storeType === "camisetas" ? "camisetas" : "carnes",
+          {
+            apology: userIsFrustrated || deliveryPromptCount > 0,
+            capturedNow,
+          }
+        );
         reply = formatWhatsAppMessage(prompt);
       }
     }

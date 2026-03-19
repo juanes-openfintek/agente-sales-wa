@@ -108,6 +108,51 @@ export function extractCityFromText(text: string): string | null {
   return null;
 }
 
+function capitalizeWords(text: string): string {
+  return text
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function extractAnyCityFromToken(text: string): string | null {
+  const trimmed = text.trim().replace(/[.;]$/, "");
+  if (!trimmed) return null;
+  if (trimmed.length < 4) return null;
+  if (trimmed.includes("@")) return null;
+  if (looksLikeAddress(trimmed)) return null;
+  if (/\d/.test(trimmed)) return null;
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 4) return null;
+  if (words.some((word) => [
+    "si",
+    "no",
+    "ok",
+    "hola",
+    "listo",
+    "dale",
+    "gracias",
+    "envio",
+    "direccion",
+    "correo",
+    "email",
+    "vivo",
+    "estoy",
+    "en",
+    "para",
+    "queda",
+    "ubicado",
+    "ciudad",
+  ].includes(word.toLowerCase()))) {
+    return null;
+  }
+  if (!words.every((word) => /^[a-zA-ZÀ-ÿ.'-]+$/.test(word))) return null;
+
+  return capitalizeWords(words.join(" "));
+}
+
 // Verificar si parece una dirección
 export function looksLikeAddress(text: string): boolean {
   const addressKeywords = [
@@ -167,9 +212,38 @@ export function hasDeliveryInfo(leadInfo: {
 // Extraer datos de envío del texto
 export function mergeDeliveryInfo(
   text: string,
-  currentInfo: { city?: string; address?: string; email?: string }
+  currentInfo: { city?: string; address?: string; email?: string },
+  options?: { allowAnyCity?: boolean }
 ): { city?: string; address?: string; email?: string } {
   const result = { ...currentInfo };
+  const allowAnyCity = options?.allowAnyCity ?? false;
+  const textLower = text.toLowerCase();
+
+  const deliveryHints =
+    text.includes("@") ||
+    text.includes("#") ||
+    /\d{4,}/.test(text) ||
+    [
+      "bogota",
+      "bogotá",
+      "cali",
+      "direccion",
+      "dirección",
+      "calle",
+      "carrera",
+      "avenida",
+      "transversal",
+      "diagonal",
+      "correo",
+      "email",
+      "gmail",
+      "hotmail",
+      "outlook",
+    ].some((keyword) => textLower.includes(keyword));
+
+  if (!deliveryHints && !allowAnyCity) {
+    return result;
+  }
 
   // Extraer email si no existe
   if (!result.email) {
@@ -182,25 +256,48 @@ export function mergeDeliveryInfo(
     }
   }
 
-  // Extraer ciudad si no existe
-  if (!result.city) {
-    const city = extractCityFromText(text);
-    if (city) {
-      result.city = city;
+  let textWithoutEmail = text;
+  if (result.email) {
+    textWithoutEmail = text.replace(result.email, " ").trim();
+  }
+
+  const tokens = textWithoutEmail
+    .split(/[,\n]/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  for (const token of tokens) {
+    if (!result.city) {
+      const city = extractCityFromText(token);
+      if (city) {
+        result.city = city;
+      } else if (allowAnyCity) {
+        const anyCity = extractAnyCityFromToken(token);
+        if (anyCity) {
+          result.city = anyCity;
+        }
+      }
+    }
+
+    if (!result.address && looksLikeAddress(token)) {
+      const validation = validateAddress(token);
+      if (validation.isValid) {
+        result.address = token.trim();
+      }
     }
   }
 
-  // Extraer dirección si no existe y parece dirección
-  if (!result.address && looksLikeAddress(text)) {
-    // Quitar email del texto para no contaminarlo
-    let cleanText = text;
-    if (result.email) {
-      cleanText = text.replace(result.email, "").trim();
+  if (!result.city && allowAnyCity) {
+    const anyCity = extractAnyCityFromToken(tokens[0] || "");
+    if (anyCity) {
+      result.city = anyCity;
     }
+  }
 
-    const validation = validateAddress(cleanText);
+  if (!result.address && looksLikeAddress(textWithoutEmail)) {
+    const validation = validateAddress(textWithoutEmail.trim());
     if (validation.isValid) {
-      result.address = cleanText.trim();
+      result.address = textWithoutEmail.trim();
     }
   }
 

@@ -562,7 +562,12 @@ VALORES VÁLIDOS PARA "action":
 - "none": Para la mayoría de interacciones (exploración, preguntas, saludos, etc.)
 - "ready_for_checkout": SOLO cuando el cliente dice explícitamente que quiere proceder a comprar
 
-Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.`;
+Si no hay un pedido concreto, order_items debe ser [] y total_price debe ser 0.
+
+REGLAS EXTRA PARA EVITAR LOOPS:
+- Nunca pidas nombre, ciudad, direccion, email, cedula, metodo de pago ni comprobante
+- Si el cliente dice que ya dio un dato, reconoce el contexto y no lo pidas otra vez
+- Si falta un detalle del pedido, pregunta solo por el siguiente dato puntual`;
 
   // Preparar historial formateado
   const formattedHistory = conversationHistory.map((msg) => ({
@@ -695,7 +700,12 @@ VALORES VÁLIDOS PARA "action":
 - "none": Para la mayoría de interacciones
 - "ready_for_checkout": SOLO cuando el cliente dice explícitamente que quiere proceder a comprar
 
-Si no hay pedido concreto, order_items debe ser [] y total_price debe ser 0.`;
+Si no hay pedido concreto, order_items debe ser [] y total_price debe ser 0.
+
+REGLAS EXTRA PARA EVITAR LOOPS:
+- Nunca pidas nombre, ciudad, direccion, email, cedula, metodo de pago ni comprobante
+- Si el cliente dice que ya dio un dato, reconoce el contexto y no lo pidas otra vez
+- Si falta un detalle del pedido, pregunta solo por el siguiente dato puntual`;
 
   const formattedHistory = conversationHistory.map((msg) => ({
     role: msg.direction,
