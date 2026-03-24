@@ -2,6 +2,8 @@
 // SERVICIO DE IA CON GEMINI + FALLBACK A GROQ
 // ============================================================
 
+import { encode } from "@toon-format/toon";
+import { parseOrderItems } from "./orderUtils";
 import { LeadInfo } from "./types";
 
 // Configuración de Gemini - Usar el modelo más avanzado disponible
@@ -48,6 +50,50 @@ interface AIResponse {
   action: string;
 }
 
+function truncateForContext(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function buildToonContext(
+  leadInfo: LeadInfo,
+  catalogData: unknown,
+  conversationHistory: Array<{ direction: string; text: string }>
+): string {
+  const currentOrderItems = parseOrderItems(leadInfo.orderItems);
+
+  const context = {
+    customer: {
+      name: leadInfo.name,
+      city: leadInfo.city,
+      email: leadInfo.email,
+      address: leadInfo.address,
+      status: leadInfo.status,
+      paymentMethod: leadInfo.paymentMethod,
+      storeType: leadInfo.storeType,
+    },
+    currentOrder: currentOrderItems.length > 0
+      ? {
+          items: currentOrderItems.map((item) => ({ item })),
+          total: leadInfo.orderTotal,
+        }
+      : undefined,
+    history: conversationHistory.slice(-8).map((message) => ({
+      role: message.direction === "in" ? "client" : "assistant",
+      text: truncateForContext(message.text, 160),
+    })),
+    catalog: catalogData,
+  };
+
+  return encode(context, {
+    replacer: (_key, value) => {
+      if (value === null || value === undefined || value === "") return undefined;
+      if (Array.isArray(value) && value.length === 0) return undefined;
+      return value;
+    },
+  });
+}
+
 // Llamar a Gemini API con historial de chat
 async function callGemini(
   systemPrompt: string,
@@ -87,7 +133,7 @@ async function callGemini(
         contents,
         generationConfig: {
           temperature: 0.4, // Más bajo = más preciso y menos alucinaciones
-          maxOutputTokens: 2048,
+          maxOutputTokens: 900,
           topP: 0.8,
         },
       }),
@@ -188,7 +234,7 @@ async function callGroq(
         model: GROQ_MODEL,
         messages,
         temperature: 0.4,
-        max_tokens: 2048,
+        max_tokens: 900,
         top_p: 0.8,
       }),
     });
@@ -476,12 +522,13 @@ function cleanGeminiResponse(text: string): string {
 export async function generateSalesResponse(
   userText: string,
   leadInfo: LeadInfo,
-  catalog: string,
+  catalogData: unknown,
   conversationHistory: Array<{ direction: string; text: string }>,
   geminiApiKey: string,
   groqApiKey: string
 ): Promise<AIResponse> {
   const customerName = leadInfo.name || "cliente";
+  const toonContext = buildToonContext(leadInfo, catalogData, conversationHistory);
 
   // Construir el pedido actual si existe
   let currentOrderContext = "";
@@ -505,8 +552,8 @@ INFORMACIÓN DEL CLIENTE:
 - Dirección: ${leadInfo.address || "No proporcionada"}
 - Estado actual: ${leadInfo.status}
 ${currentOrderContext}
-CATÁLOGO COMPLETO DE CARNES Y COMBOS:
-${catalog}
+CONTEXTO ESTRUCTURADO (TOON):
+${toonContext}
 
 ZONAS DE COBERTURA:
 - ✅ Bogotá
@@ -531,6 +578,9 @@ FLUJO DE VENTAS:
 
 REGLAS CRÍTICAS - LEE CON ATENCIÓN:
 - Sé profesional pero cercano y amable
+- Responde de forma breve: normalmente entre 2 y 5 lineas cortas
+- Evita bloques largos, introducciones repetidas y volver a explicar todo el catalogo
+- Si haces recomendaciones, prioriza 1 opcion principal y como maximo 3 opciones
 - Habla de carnes CRUDAS, no de comida preparada
 - Menciona que son productos frescos y de alta calidad
 - DESTACA LOS ITEMS GRATIS en los combos para hacerlos más atractivos
@@ -549,6 +599,7 @@ FORMATO DE MENSAJES (IMPORTANTE - Usa formato WhatsApp):
 - Para destacar usa: *texto* (negrita simple)
 - Para gratis usa: 🎁 GRATIS
 - NO uses **texto** (doble asterisco) - usa solo *texto*
+- Evita mensajes de mas de 120 palabras salvo que el cliente pida mucho detalle
 
 FORMATO DE RESPUESTA JSON (ESTRICTO - solo JSON, sin texto antes ni después):
 {
@@ -599,12 +650,13 @@ REGLAS EXTRA PARA EVITAR LOOPS:
 export async function generateShirtSalesResponse(
   userText: string,
   leadInfo: LeadInfo,
-  catalog: string,
+  catalogData: unknown,
   conversationHistory: Array<{ direction: string; text: string }>,
   geminiApiKey: string,
   groqApiKey: string
 ): Promise<AIResponse> {
   const customerName = leadInfo.name || "cliente";
+  const toonContext = buildToonContext(leadInfo, catalogData, conversationHistory);
 
   // Construir el pedido actual si existe
   let currentOrderContext = "";
@@ -628,8 +680,8 @@ INFORMACIÓN DEL CLIENTE:
 - Dirección: ${leadInfo.address || "No proporcionada"}
 - Estado actual: ${leadInfo.status}
 ${currentOrderContext}
-CATÁLOGO COMPLETO:
-${catalog}
+CONTEXTO ESTRUCTURADO (TOON):
+${toonContext}
 
 REGLAS DE PRECIO (MUY IMPORTANTE — lee con atención):
 - Lo que determina si hay recargo o no es el TOTAL DE UNIDADES del pedido completo (sumando todos los tipos)
@@ -675,6 +727,9 @@ FLUJO DE VENTAS:
 
 REGLAS CRÍTICAS:
 - Sé profesional pero cercano y amable
+- Responde de forma breve: normalmente entre 2 y 5 lineas cortas
+- Evita bloques largos, introducciones repetidas y volver a explicar todo el catalogo
+- Si muestras opciones, prioriza 1 opcion principal y como maximo 3 opciones
 - Habla de CAMISETAS, no de carnes ni otros productos
 - NUNCA digas que no hay stock, que no hay disponibilidad o que no hay camisetas. SIEMPRE tenemos camisetas disponibles. El inventario lo manejamos nosotros internamente — tú solo vendes
 - NUNCA confirmes un pedido que el cliente NO haya hecho explícitamente
@@ -687,6 +742,7 @@ FORMATO DE MENSAJES (WhatsApp):
 - Para separadores usa: ━━━━━━━━━━━━━━━━━━━━━
 - Para destacar usa: *texto* (negrita simple)
 - NO uses **texto** (doble asterisco)
+- Evita mensajes de mas de 120 palabras salvo que el cliente pida mucho detalle
 
 FORMATO DE RESPUESTA JSON (ESTRICTO - solo JSON, sin texto antes ni después):
 {

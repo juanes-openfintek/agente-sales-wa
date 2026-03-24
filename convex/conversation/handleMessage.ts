@@ -4,7 +4,7 @@
 
 import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "../_generated/server";
-import { internal } from "../_generated/api";
+import { api, internal } from "../_generated/api";
 import {
   ConversationState,
   ConversationStateType,
@@ -61,6 +61,8 @@ import {
   formatSmartDeliveryPrompt,
   formatUsingProfileName,
 } from "../lib/smartMessages";
+import { sendScheduledOrderEmail } from "../lib/email";
+import { parseOrderItems } from "../lib/orderUtils";
 
 // ============================================================
 // INTERNAL QUERIES
@@ -184,6 +186,80 @@ export const getCatalog = internalQuery({
     }
 
     return catalog;
+  },
+});
+
+export const getStructuredCamisetasCatalog = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const camisetas = await ctx.db.query("camisetas").collect();
+    const activas = camisetas.filter((c) => c.activo !== false);
+
+    return {
+      pricing: {
+        rule: "6_or_more_units_base_price_otherwise_plus_2000",
+        bogotaShipping: 10000,
+        otherCitiesShipping: "quoted",
+      },
+      colors: [
+        "Blanco", "Negro", "Gris", "Amarillo", "Vainilla", "Nude", "Mocca",
+        "Rojo", "Azul Navy", "Azul Rey", "Azul Medio", "Verde Militar",
+        "Verde Cali", "Rosa", "Lila", "Petroleo", "Vinotinto", "Mostaza", "Terracota",
+      ],
+      products: activas.map((item) => ({
+        nombre: item.nombre,
+        tipo: item.tipo,
+        tallas: JSON.parse(item.tallas) as string[],
+        colores: item.colores ? JSON.parse(item.colores) as string[] : undefined,
+        precioBase: item.precioBase,
+        precioConRecargo: item.precioBase + 2000,
+      })),
+    };
+  },
+});
+
+export const getStructuredCatalog = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const products = await ctx.db.query("inventarioComidasRapidas").collect();
+    const combos = await ctx.db.query("combos").collect();
+
+    const comboItemsByKey = new Map<string, Array<{
+      nombre: string;
+      cantidad: number;
+      gratis: boolean;
+    }>>();
+
+    const comboItems = await ctx.db.query("comboItems").collect();
+    for (const item of comboItems) {
+      const existing = comboItemsByKey.get(item.comboKey) || [];
+      existing.push({
+        nombre: item.itemName,
+        cantidad: item.cantidad ?? item.qty ?? 1,
+        gratis: item.isFree ?? false,
+      });
+      comboItemsByKey.set(item.comboKey, existing);
+    }
+
+    return {
+      coverageCities: ["Bogota", "Cali"],
+      products: products
+        .filter((item) => item.disponible !== false)
+        .map((item) => ({
+          nombre: item.nombre,
+          precio: item.precio,
+          descripcion: item.descripcion,
+          categoria: item.categoria,
+        })),
+      combos: combos
+        .filter((item) => item.disponible !== false)
+        .map((item) => ({
+          nombre: item.nombre,
+          precio: item.precio,
+          descripcion: item.descripcion,
+          items: comboItemsByKey.get(item.comboKey) || [],
+        })),
+    };
   },
 });
 
@@ -476,8 +552,8 @@ export const processMessage = internalAction({
       if (geminiApiKey || groqApiKey) {
         // Cargar catálogo según la tienda elegida
         const catalog = storeType === "camisetas"
-          ? await ctx.runQuery(internal.conversation.handleMessage.getCamisetasCatalog, {})
-          : await ctx.runQuery(internal.conversation.handleMessage.getCatalog, {});
+          ? await ctx.runQuery(internal.conversation.handleMessage.getStructuredCamisetasCatalog, {})
+          : await ctx.runQuery(internal.conversation.handleMessage.getStructuredCatalog, {});
 
         // Llamar al agente de IA correspondiente
         const aiResponse = storeType === "camisetas"
@@ -626,6 +702,30 @@ export const processMessage = internalAction({
       const textLower = text.toLowerCase();
 
       if (["si", "sí", "confirmar", "confirmo"].some(x => textLower.includes(x))) {
+        let orderNumber: number | undefined;
+
+        if (!lead?.currentOrderId && leadInfo.orderItems) {
+          const orderResult = await ctx.runMutation(api.orders.create, {
+            phone,
+            items: parseOrderItems(leadInfo.orderItems),
+            total: leadInfo.orderTotal,
+            deliveryAddress: leadInfo.address,
+          });
+          orderNumber = orderResult.orderNumber;
+        }
+
+        await sendScheduledOrderEmail({
+          phone,
+          customerName: leadInfo.name,
+          customerEmail: leadInfo.email,
+          city: leadInfo.city,
+          address: leadInfo.address,
+          storeType: leadInfo.storeType,
+          orderItems: leadInfo.orderItems,
+          orderTotal: leadInfo.orderTotal,
+          orderNumber,
+        });
+
         await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
           phone,
           status: ConversationState.COLLECTING_CEDULA,
