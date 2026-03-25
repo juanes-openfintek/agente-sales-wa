@@ -27,7 +27,7 @@ export async function sendScheduledOrderEmail(args: ScheduledOrderEmailArgs): Pr
     return { sent: false, error: "missing_resend_api_key" };
   }
 
-  const to = process.env.NOTIFICATION_EMAIL || "juanes.200.200@gmail.com";
+  const to = process.env.NOTIFICATION_EMAIL || "ds.ai@openfintek.co";
   const from = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
   const storeLabel = args.storeType === "camisetas" ? "Camisetas" : "Carnes";
   const customerName = args.customerName || "Sin nombre";
