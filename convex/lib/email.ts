@@ -70,10 +70,12 @@ export async function sendScheduledOrderEmail(args: ScheduledOrderEmailArgs): Pr
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[EMAIL] Error enviando email:", errorText);
+      console.error(`[EMAIL] Error enviando email (HTTP ${response.status}):`, errorText);
       return { sent: false, error: errorText };
     }
 
+    const responseData = await response.json();
+    console.log(`[EMAIL] ✅ Email enviado exitosamente a ${to}. ID: ${responseData.id || "N/A"}`);
     return { sent: true };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

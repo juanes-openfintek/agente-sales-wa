@@ -714,7 +714,7 @@ export const processMessage = internalAction({
           orderNumber = orderResult.orderNumber;
         }
 
-        await sendScheduledOrderEmail({
+        const emailResult = await sendScheduledOrderEmail({
           phone,
           customerName: leadInfo.name,
           customerEmail: leadInfo.email,
@@ -725,6 +725,7 @@ export const processMessage = internalAction({
           orderTotal: leadInfo.orderTotal,
           orderNumber,
         });
+        console.log(`[EMAIL] Envío en CONFIRMING_ORDER para ${phone}: sent=${emailResult.sent}${emailResult.error ? `, error=${emailResult.error}` : ""}`);
 
         await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
           phone,
@@ -797,6 +798,21 @@ export const processMessage = internalAction({
           paymentMethod,
           status: ConversationState.PAYMENT_COMPLETED,
         });
+
+        // Enviar email de confirmación al completar pago
+        const emailResult = await sendScheduledOrderEmail({
+          phone,
+          customerName: leadInfo.name,
+          customerEmail: leadInfo.email,
+          city: leadInfo.city,
+          address: leadInfo.address,
+          storeType: leadInfo.storeType,
+          orderItems: leadInfo.orderItems,
+          orderTotal: leadInfo.orderTotal,
+          orderNumber: lead?.totalOrders,
+        });
+        console.log(`[EMAIL] Envío en PAYMENT_COMPLETED (contra entrega) para ${phone}: sent=${emailResult.sent}${emailResult.error ? `, error=${emailResult.error}` : ""}`);
+
         reply = formatWhatsAppMessage(formatPaymentCompletedCash());
         currentState = ConversationState.PAYMENT_COMPLETED;
         action = "order_completed";
@@ -823,6 +839,20 @@ export const processMessage = internalAction({
           phone,
           status: ConversationState.PAYMENT_COMPLETED,
         });
+
+        // Enviar email de confirmación al completar pago por transferencia
+        const emailResult = await sendScheduledOrderEmail({
+          phone,
+          customerName: leadInfo.name,
+          customerEmail: leadInfo.email,
+          city: leadInfo.city,
+          address: leadInfo.address,
+          storeType: leadInfo.storeType,
+          orderItems: leadInfo.orderItems,
+          orderTotal: leadInfo.orderTotal,
+        });
+        console.log(`[EMAIL] Envío en PAYMENT_COMPLETED (transferencia) para ${phone}: sent=${emailResult.sent}${emailResult.error ? `, error=${emailResult.error}` : ""}`);
+
         reply = formatWhatsAppMessage(formatPaymentCompletedTransfer());
         currentState = ConversationState.PAYMENT_COMPLETED;
         action = "order_completed";
