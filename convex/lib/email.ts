@@ -6,6 +6,9 @@ interface ScheduledOrderEmailArgs {
   customerEmail?: string;
   address?: string;
   city?: string;
+  deliveryReceiverType?: string;
+  deliveryReceiverName?: string;
+  deliveryReceiverPhone?: string;
   storeType?: string;
   orderItems?: string;
   orderTotal?: number;
@@ -15,6 +18,21 @@ interface ScheduledOrderEmailArgs {
 function formatMoney(value?: number): string {
   if (!value) return "No disponible";
   return `$${value.toLocaleString("es-CO")}`;
+}
+
+function formatDeliveryReceiver(args: ScheduledOrderEmailArgs): string {
+  switch (args.deliveryReceiverType) {
+    case "same_person":
+      return "La misma persona";
+    case "porteria":
+      return "Porteria";
+    case "other_person":
+      return args.deliveryReceiverName && args.deliveryReceiverPhone
+        ? `${args.deliveryReceiverName} (${args.deliveryReceiverPhone})`
+        : args.deliveryReceiverName || "Otra persona";
+    default:
+      return "No disponible";
+  }
 }
 
 export async function sendScheduledOrderEmail(args: ScheduledOrderEmailArgs): Promise<{
@@ -44,6 +62,7 @@ export async function sendScheduledOrderEmail(args: ScheduledOrderEmailArgs): Pr
         <tr><td style="padding:8px 0;font-weight:bold">Correo cliente</td><td style="padding:8px 0">${escapeHtml(args.customerEmail || "No disponible")}</td></tr>
         <tr><td style="padding:8px 0;font-weight:bold">Ciudad</td><td style="padding:8px 0">${escapeHtml(args.city || "No disponible")}</td></tr>
         <tr><td style="padding:8px 0;font-weight:bold">Direccion</td><td style="padding:8px 0">${escapeHtml(args.address || "No disponible")}</td></tr>
+        <tr><td style="padding:8px 0;font-weight:bold">Recibe</td><td style="padding:8px 0">${escapeHtml(formatDeliveryReceiver(args))}</td></tr>
         <tr><td style="padding:8px 0;font-weight:bold">Total</td><td style="padding:8px 0">${escapeHtml(formatMoney(args.orderTotal))}</td></tr>
       </table>
       <h2 style="margin:0 0 12px">Items</h2>

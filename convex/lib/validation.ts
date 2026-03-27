@@ -1,33 +1,46 @@
 // ============================================================
-// FUNCIONES DE VALIDACIÓN
+// FUNCIONES DE VALIDACION
 // ============================================================
 
-import { VALID_CITIES } from "./types";
+import {
+  DELIVERY_RECEIVER_TYPES,
+  VALID_CITIES,
+  type DeliveryReceiverType,
+} from "./types";
 
 // Palabras que NUNCA son un nombre de persona
 const NON_NAME_WORDS = new Set([
-  // Saludos
-  "hola", "hello", "hi", "hey", "alo", "aló", "buenas", "buenos",
-  // Saludos con tiempo
-  "buen", "buendia", "buendía",
-  // Respuestas cortas
-  "si", "sí", "no", "ok", "okay", "okey", "dale", "listo", "claro", "bien",
+  "hola", "hello", "hi", "hey", "alo", "alo", "buenas", "buenos",
+  "buen", "buendia", "buendia",
+  "si", "si", "no", "ok", "okay", "okey", "dale", "listo", "claro", "bien",
   "mal", "regular", "gracias", "porfa", "perfecto", "exacto", "correcto",
-  // Preguntas / conectores
-  "que", "qué", "como", "cómo", "cuando", "cuándo", "donde", "dónde",
-  "quien", "quién", "cual", "cuál", "para", "con", "por", "favor",
-  // Palabras de chat
+  "que", "que", "como", "como", "cuando", "cuando", "donde", "donde",
+  "quien", "quien", "cual", "cual", "para", "con", "por", "favor",
   "jaja", "jeje", "xd", "lol", "oke", "va", "ya", "ah", "oh", "uh",
-  // Expresiones
-  "genial", "excelente", "super", "súper", "chévere", "chevere",
+  "genial", "excelente", "super", "super", "chevere", "chevere",
 ]);
 
-// Verifica si un texto es claramente un saludo/palabra común y no un nombre
+function normalizeText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function capitalizeWords(text: string): string {
+  return text
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// Verifica si un texto es claramente un saludo/palabra comun y no un nombre
 export function isLikelyNotAName(text: string): boolean {
-  const lower = text.trim().toLowerCase();
-  // Si cada palabra del texto está en el blocklist, no es un nombre
+  const lower = normalizeText(text);
   const words = lower.split(/\s+/);
-  return words.every((w) => NON_NAME_WORDS.has(w));
+  return words.every((word) => NON_NAME_WORDS.has(word));
 }
 
 // Validar nombre
@@ -38,11 +51,9 @@ export function validateName(name: string): { isValid: boolean; error?: string }
   if (name.trim().length > 100) {
     return { isValid: false, error: "El nombre es demasiado largo" };
   }
-  // Rechazar si parece ser solo números o caracteres especiales
   if (/^[\d\s\W]+$/.test(name)) {
-    return { isValid: false, error: "El nombre no parece válido" };
+    return { isValid: false, error: "El nombre no parece valido" };
   }
-  // Rechazar saludos y palabras comunes que no son nombres
   if (isLikelyNotAName(name)) {
     return { isValid: false, error: "Eso no parece un nombre" };
   }
@@ -53,29 +64,37 @@ export function validateName(name: string): { isValid: boolean; error?: string }
 export function validateEmail(email: string): { isValid: boolean; error?: string } {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
-    return { isValid: false, error: "El email no tiene un formato válido" };
+    return { isValid: false, error: "El email no tiene un formato valido" };
   }
   return { isValid: true };
 }
 
-// Validar dirección
+// Validar telefono
+export function validatePhone(phone: string): { isValid: boolean; error?: string } {
+  const cleanPhone = phone.replace(/\D/g, "");
+  if (cleanPhone.length < 7 || cleanPhone.length > 15) {
+    return { isValid: false, error: "El telefono debe tener entre 7 y 15 digitos" };
+  }
+  return { isValid: true };
+}
+
+// Validar direccion
 export function validateAddress(address: string): { isValid: boolean; error?: string } {
   if (!address || address.trim().length < 10) {
-    return { isValid: false, error: "La dirección es muy corta" };
+    return { isValid: false, error: "La direccion es muy corta" };
   }
   if (address.trim().length > 200) {
-    return { isValid: false, error: "La dirección es demasiado larga" };
+    return { isValid: false, error: "La direccion es demasiado larga" };
   }
   return { isValid: true };
 }
 
-// Validar cédula colombiana
+// Validar cedula colombiana
 export function validateCedula(cedula: string): { isValid: boolean; error?: string } {
-  // Limpiar caracteres no numéricos
   const cleanCedula = cedula.replace(/\D/g, "");
 
   if (cleanCedula.length < 6 || cleanCedula.length > 12) {
-    return { isValid: false, error: "La cédula debe tener entre 6 y 12 dígitos" };
+    return { isValid: false, error: "La cedula debe tener entre 6 y 12 digitos" };
   }
   return { isValid: true };
 }
@@ -87,9 +106,19 @@ export function extractEmailFromText(text: string): string | null {
   return match ? match[0].toLowerCase() : null;
 }
 
-// Extraer cédula del texto
+// Extraer telefono del texto
+export function extractPhoneFromText(text: string): string | null {
+  const phoneRegex = /(?:\+?\d[\d\s-]{6,}\d)/;
+  const match = text.match(phoneRegex);
+  if (!match) return null;
+
+  const cleanPhone = match[0].replace(/\D/g, "");
+  const validation = validatePhone(cleanPhone);
+  return validation.isValid ? cleanPhone : null;
+}
+
+// Extraer cedula del texto
 export function extractCedulaFromText(text: string): string | null {
-  // Buscar secuencias de 6-12 dígitos
   const cedulaRegex = /\b\d{6,12}\b/;
   const match = text.replace(/[.\-\s]/g, "").match(cedulaRegex);
   return match ? match[0] : null;
@@ -97,23 +126,14 @@ export function extractCedulaFromText(text: string): string | null {
 
 // Extraer ciudad del texto
 export function extractCityFromText(text: string): string | null {
-  const textLower = text.toLowerCase();
+  const textLower = normalizeText(text);
 
   for (const city of VALID_CITIES) {
-    if (textLower.includes(city)) {
-      // Normalizar a formato capitalizado
-      return city === "bogota" || city === "bogotá" ? "Bogotá" : "Cali";
+    if (textLower.includes(normalizeText(city))) {
+      return city === "bogota" || city === "bogota" ? "Bogota" : "Cali";
     }
   }
   return null;
-}
-
-function capitalizeWords(text: string): string {
-  return text
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
 }
 
 function extractAnyCityFromToken(text: string): string | null {
@@ -126,26 +146,30 @@ function extractAnyCityFromToken(text: string): string | null {
 
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length === 0 || words.length > 4) return null;
-  if (words.some((word) => [
-    "si",
-    "no",
-    "ok",
-    "hola",
-    "listo",
-    "dale",
-    "gracias",
-    "envio",
-    "direccion",
-    "correo",
-    "email",
-    "vivo",
-    "estoy",
-    "en",
-    "para",
-    "queda",
-    "ubicado",
-    "ciudad",
-  ].includes(word.toLowerCase()))) {
+  if (
+    words.some((word) =>
+      [
+        "si",
+        "no",
+        "ok",
+        "hola",
+        "listo",
+        "dale",
+        "gracias",
+        "envio",
+        "direccion",
+        "correo",
+        "email",
+        "vivo",
+        "estoy",
+        "en",
+        "para",
+        "queda",
+        "ubicado",
+        "ciudad",
+      ].includes(normalizeText(word))
+    )
+  ) {
     return null;
   }
   if (!words.every((word) => /^[a-zA-ZÀ-ÿ.'-]+$/.test(word))) return null;
@@ -153,71 +177,200 @@ function extractAnyCityFromToken(text: string): string | null {
   return capitalizeWords(words.join(" "));
 }
 
-// Verificar si parece una dirección
+function cleanupReceiverName(text: string): string {
+  return text
+    .replace(/[0-9]/g, " ")
+    .replace(
+      /\b(la recibe|lo recibe|recibe|sera|sera|otra persona|persona|porteria|recepcion|telefono|celular|contacto|nombre|es|seria|deja|dejala|dejarla|en)\b/gi,
+      " "
+    )
+    .replace(/\b(mi|su)\b/gi, " ")
+    .replace(
+      /\b(esposa|esposo|hermana|hermano|mama|papa|tia|tio|prima|primo|novia|novio|amiga|amigo|vecina|vecino|portero|portera)\b/gi,
+      " "
+    )
+    .replace(/[^\p{L}\s'-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractReceiverNameFromToken(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed || looksLikeAddress(trimmed) || trimmed.includes("@")) return null;
+
+  const patterns = [
+    /\b(?:la|lo)\s+recibe\s+(.+)$/i,
+    /\brecibe\s+(.+)$/i,
+    /\bsera\s+(.+)$/i,
+    /\bser[aá]\s+(.+)$/i,
+    /\botra persona(?:\s+la\s+recibe)?\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (!match?.[1]) continue;
+    const candidate = cleanupReceiverName(match[1]);
+    if (!candidate) continue;
+    const validation = validateName(candidate);
+    if (validation.isValid) {
+      return capitalizeWords(candidate);
+    }
+  }
+
+  const candidate = cleanupReceiverName(trimmed);
+  if (!candidate) return null;
+
+  const validation = validateName(candidate);
+  if (!validation.isValid || candidate.split(/\s+/).length > 4) {
+    return null;
+  }
+
+  return capitalizeWords(candidate);
+}
+
+function detectDeliveryReceiverType(text: string): DeliveryReceiverType | null {
+  const normalized = normalizeText(text);
+
+  if (
+    ["porteria", "recepcion", "vigilancia", "portero", "portera"].some((value) =>
+      normalized.includes(value)
+    )
+  ) {
+    return DELIVERY_RECEIVER_TYPES.PORTERIA;
+  }
+
+  if (
+    [
+      "la recibo yo",
+      "lo recibo yo",
+      "yo la recibo",
+      "yo lo recibo",
+      "misma persona",
+      "yo mismo",
+      "yo misma",
+      "personalmente",
+      "para mi",
+      "soy yo",
+    ].some((value) => normalized.includes(value))
+  ) {
+    return DELIVERY_RECEIVER_TYPES.SAME_PERSON;
+  }
+
+  if (
+    [
+      "otra persona",
+      "la recibe",
+      "lo recibe",
+      "recibe mi",
+      "recibe otra",
+      "recibira",
+      "sera otra persona",
+    ].some((value) => normalized.includes(value))
+  ) {
+    return DELIVERY_RECEIVER_TYPES.OTHER_PERSON;
+  }
+
+  if (normalized === "yo" || normalized === "si yo") {
+    return DELIVERY_RECEIVER_TYPES.SAME_PERSON;
+  }
+
+  return null;
+}
+
+// Verificar si parece una direccion
 export function looksLikeAddress(text: string): boolean {
   const addressKeywords = [
     "calle", "carrera", "cra", "cl", "avenida", "av",
     "transversal", "tr", "diagonal", "dg", "manzana",
     "conjunto", "edificio", "torre", "apto", "apartamento",
-    "casa", "local", "oficina", "#", "no.", "número"
+    "casa", "local", "oficina", "#", "no.", "numero",
   ];
 
-  const textLower = text.toLowerCase();
-  return addressKeywords.some(keyword => textLower.includes(keyword));
+  const textLower = normalizeText(text);
+  return addressKeywords.some((keyword) => textLower.includes(keyword));
 }
 
-// Detectar intención de pedido
+// Detectar intencion de pedido
 export function isOrderIntent(text: string): boolean {
   const orderKeywords = [
-    "quiero", "quisiera", "me gustaría", "pedido", "pedir",
+    "quiero", "quisiera", "me gustaria", "pedido", "pedir",
     "ordenar", "comprar", "llevar", "combo", "hamburguesa",
-    "pizza", "perro", "hot dog"
+    "pizza", "perro", "hot dog",
   ];
 
-  const textLower = text.toLowerCase();
-  return orderKeywords.some(keyword => textLower.includes(keyword));
+  const textLower = normalizeText(text);
+  return orderKeywords.some((keyword) => textLower.includes(keyword));
 }
 
 // Detectar solicitud de nuevo pedido
 export function isNewOrderRequest(text: string): boolean {
   const newOrderKeywords = [
     "nuevo pedido", "otro pedido", "pedir de nuevo",
-    "quiero pedir", "hacer otro", "nueva orden"
+    "quiero pedir", "hacer otro", "nueva orden",
   ];
 
-  const textLower = text.toLowerCase();
-  return newOrderKeywords.some(keyword => textLower.includes(keyword));
+  const textLower = normalizeText(text);
+  return newOrderKeywords.some((keyword) => textLower.includes(keyword));
 }
 
-// Detectar solicitud de modificación
+// Detectar solicitud de modificacion
 export function isModificationRequest(text: string): boolean {
   const modificationKeywords = [
-    "cambiar", "modificar", "agregar", "quitar", "añadir",
-    "eliminar", "diferente", "otro", "más", "menos"
+    "cambiar", "modificar", "agregar", "quitar", "anadir",
+    "eliminar", "diferente", "otro", "mas", "menos",
   ];
 
-  const textLower = text.toLowerCase();
-  return modificationKeywords.some(keyword => textLower.includes(keyword));
+  const textLower = normalizeText(text);
+  return modificationKeywords.some((keyword) => textLower.includes(keyword));
 }
 
-// Verificar si tiene todos los datos de envío
+// Verificar si tiene todos los datos de envio
 export function hasDeliveryInfo(leadInfo: {
   city?: string;
   address?: string;
   email?: string;
+  deliveryReceiverType?: DeliveryReceiverType;
+  deliveryReceiverName?: string;
+  deliveryReceiverPhone?: string;
 }): boolean {
-  return !!(leadInfo.city && leadInfo.address && leadInfo.email);
+  if (!leadInfo.city || !leadInfo.address || !leadInfo.email || !leadInfo.deliveryReceiverType) {
+    return false;
+  }
+
+  if (leadInfo.deliveryReceiverType === DELIVERY_RECEIVER_TYPES.OTHER_PERSON) {
+    return !!(leadInfo.deliveryReceiverName && leadInfo.deliveryReceiverPhone);
+  }
+
+  return true;
 }
 
-// Extraer datos de envío del texto
+// Extraer datos de envio del texto
 export function mergeDeliveryInfo(
   text: string,
-  currentInfo: { city?: string; address?: string; email?: string },
+  currentInfo: {
+    city?: string;
+    address?: string;
+    email?: string;
+    deliveryReceiverType?: DeliveryReceiverType;
+    deliveryReceiverName?: string;
+    deliveryReceiverPhone?: string;
+  },
   options?: { allowAnyCity?: boolean }
-): { city?: string; address?: string; email?: string } {
+): {
+  city?: string;
+  address?: string;
+  email?: string;
+  deliveryReceiverType?: DeliveryReceiverType;
+  deliveryReceiverName?: string;
+  deliveryReceiverPhone?: string;
+} {
   const result = { ...currentInfo };
   const allowAnyCity = options?.allowAnyCity ?? false;
-  const textLower = text.toLowerCase();
+  const textLower = normalizeText(text);
+  const detectedReceiverType = detectDeliveryReceiverType(text);
+  const waitingReceiverDetails =
+    currentInfo.deliveryReceiverType === DELIVERY_RECEIVER_TYPES.OTHER_PERSON &&
+    (!currentInfo.deliveryReceiverName || !currentInfo.deliveryReceiverPhone);
 
   const deliveryHints =
     text.includes("@") ||
@@ -225,10 +378,8 @@ export function mergeDeliveryInfo(
     /\d{4,}/.test(text) ||
     [
       "bogota",
-      "bogotá",
       "cali",
       "direccion",
-      "dirección",
       "calle",
       "carrera",
       "avenida",
@@ -239,13 +390,19 @@ export function mergeDeliveryInfo(
       "gmail",
       "hotmail",
       "outlook",
+      "porteria",
+      "recepcion",
+      "recibe",
+      "recibir",
+      "misma persona",
+      "otra persona",
+      "yo",
     ].some((keyword) => textLower.includes(keyword));
 
-  if (!deliveryHints && !allowAnyCity) {
+  if (!deliveryHints && !allowAnyCity && !detectedReceiverType && !waitingReceiverDetails) {
     return result;
   }
 
-  // Extraer email si no existe
   if (!result.email) {
     const email = extractEmailFromText(text);
     if (email) {
@@ -259,6 +416,25 @@ export function mergeDeliveryInfo(
   let textWithoutEmail = text;
   if (result.email) {
     textWithoutEmail = text.replace(result.email, " ").trim();
+  }
+
+  const detectedReceiverTypeWithoutEmail = detectDeliveryReceiverType(textWithoutEmail);
+  if (detectedReceiverTypeWithoutEmail || detectedReceiverType) {
+    result.deliveryReceiverType = detectedReceiverTypeWithoutEmail || detectedReceiverType;
+    if (result.deliveryReceiverType !== DELIVERY_RECEIVER_TYPES.OTHER_PERSON) {
+      result.deliveryReceiverName = undefined;
+      result.deliveryReceiverPhone = undefined;
+    }
+  }
+
+  if (
+    result.deliveryReceiverType === DELIVERY_RECEIVER_TYPES.OTHER_PERSON &&
+    !result.deliveryReceiverPhone
+  ) {
+    const receiverPhone = extractPhoneFromText(textWithoutEmail);
+    if (receiverPhone) {
+      result.deliveryReceiverPhone = receiverPhone;
+    }
   }
 
   const tokens = textWithoutEmail
@@ -285,6 +461,16 @@ export function mergeDeliveryInfo(
         result.address = token.trim();
       }
     }
+
+    if (
+      result.deliveryReceiverType === DELIVERY_RECEIVER_TYPES.OTHER_PERSON &&
+      !result.deliveryReceiverName
+    ) {
+      const receiverName = extractReceiverNameFromToken(token);
+      if (receiverName) {
+        result.deliveryReceiverName = receiverName;
+      }
+    }
   }
 
   if (!result.city && allowAnyCity) {
@@ -298,6 +484,16 @@ export function mergeDeliveryInfo(
     const validation = validateAddress(textWithoutEmail.trim());
     if (validation.isValid) {
       result.address = textWithoutEmail.trim();
+    }
+  }
+
+  if (
+    result.deliveryReceiverType === DELIVERY_RECEIVER_TYPES.OTHER_PERSON &&
+    !result.deliveryReceiverName
+  ) {
+    const receiverName = extractReceiverNameFromToken(textWithoutEmail);
+    if (receiverName) {
+      result.deliveryReceiverName = receiverName;
     }
   }
 

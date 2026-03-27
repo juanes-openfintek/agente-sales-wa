@@ -14,6 +14,9 @@ export default defineSchema({
     age: v.optional(v.number()),
     cedula: v.optional(v.string()), // ID colombiano
     city: v.optional(v.string()),
+    deliveryReceiverType: v.optional(v.string()),
+    deliveryReceiverName: v.optional(v.string()),
+    deliveryReceiverPhone: v.optional(v.string()),
     deliveryTime: v.optional(v.string()),
     status: v.string(), // Estado de conversación (ConversationState)
     paymentMethod: v.optional(v.string()),

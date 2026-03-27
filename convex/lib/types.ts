@@ -69,6 +69,15 @@ export interface StateMachineResponse {
   newStatus: ConversationStateType;
 }
 
+export const DELIVERY_RECEIVER_TYPES = {
+  SAME_PERSON: "same_person",
+  PORTERIA: "porteria",
+  OTHER_PERSON: "other_person",
+} as const;
+
+export type DeliveryReceiverType =
+  typeof DELIVERY_RECEIVER_TYPES[keyof typeof DELIVERY_RECEIVER_TYPES];
+
 // Interfaz para información del lead
 export interface LeadInfo {
   phone: string;
@@ -76,6 +85,9 @@ export interface LeadInfo {
   email?: string;
   address?: string;
   city?: string;
+  deliveryReceiverType?: DeliveryReceiverType;
+  deliveryReceiverName?: string;
+  deliveryReceiverPhone?: string;
   cedula?: string;
   status: ConversationStateType;
   paymentMethod?: string;

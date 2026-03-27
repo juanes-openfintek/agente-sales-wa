@@ -5,7 +5,13 @@ export interface ConversationEvent {
   text: string;
 }
 
-type DeliveryField = "city" | "address" | "email";
+type DeliveryField =
+  | "city"
+  | "address"
+  | "email"
+  | "deliveryReceiverType"
+  | "deliveryReceiverName"
+  | "deliveryReceiverPhone";
 
 function normalizeText(text: string): string {
   return text
@@ -35,19 +41,20 @@ export function countNamePrompts(history: ConversationEvent[]): number {
   return countOutgoingMatches(history, [
     "cual es tu nombre",
     "me puedes decir tu nombre",
-    "no logre captar tu nombre",
+    "no alcance a captar tu nombre",
     "solo necesito tu nombre",
-    "solo enviame tu nombre",
+    "escribeme solo tu nombre",
   ]);
 }
 
 export function countDeliveryPrompts(history: ConversationEvent[]): number {
   return countOutgoingMatches(history, [
-    "para completar tu pedido necesito",
+    "para cerrar el pedido me faltan",
     "solo me falta",
     "direccion de entrega",
     "correo electronico",
-    "envialos en un solo mensaje",
+    "quien recibe la entrega",
+    "se deja en porteria",
   ]);
 }
 
@@ -96,14 +103,37 @@ export function extractProfileName(pushName?: string | null): string | null {
 }
 
 export function getNewDeliveryFields(
-  before: { city?: string; address?: string; email?: string },
-  after: { city?: string; address?: string; email?: string }
+  before: {
+    city?: string;
+    address?: string;
+    email?: string;
+    deliveryReceiverType?: string;
+    deliveryReceiverName?: string;
+    deliveryReceiverPhone?: string;
+  },
+  after: {
+    city?: string;
+    address?: string;
+    email?: string;
+    deliveryReceiverType?: string;
+    deliveryReceiverName?: string;
+    deliveryReceiverPhone?: string;
+  }
 ): DeliveryField[] {
   const fields: DeliveryField[] = [];
 
   if (!before.city && after.city) fields.push("city");
   if (!before.address && after.address) fields.push("address");
   if (!before.email && after.email) fields.push("email");
+  if (!before.deliveryReceiverType && after.deliveryReceiverType) {
+    fields.push("deliveryReceiverType");
+  }
+  if (!before.deliveryReceiverName && after.deliveryReceiverName) {
+    fields.push("deliveryReceiverName");
+  }
+  if (!before.deliveryReceiverPhone && after.deliveryReceiverPhone) {
+    fields.push("deliveryReceiverPhone");
+  }
 
   return fields;
 }

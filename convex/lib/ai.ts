@@ -593,13 +593,17 @@ REGLAS CRÍTICAS - LEE CON ATENCIÓN:
 - Si el cliente pregunta precios o info de productos, eso NO es un pedido - es exploración
 
 FORMATO DE MENSAJES (IMPORTANTE - Usa formato WhatsApp):
+- Prioriza respuestas cortas y utiles
+- Normalmente responde en 1 a 3 lineas
+- Si una frase basta, no agregues relleno
+- Suena cercano y amable, nunca frio ni robotico
 - Para listas usa bullets: • Item 1
 - Para precios usa: $XX,XXX
 - Para separadores usa: ━━━━━━━━━━━━━━━━━━━━━
 - Para destacar usa: *texto* (negrita simple)
 - Para gratis usa: 🎁 GRATIS
 - NO uses **texto** (doble asterisco) - usa solo *texto*
-- Evita mensajes de mas de 120 palabras salvo que el cliente pida mucho detalle
+- Evita mensajes de mas de 80 palabras salvo que el cliente pida mucho detalle
 
 FORMATO DE RESPUESTA JSON (ESTRICTO - solo JSON, sin texto antes ni después):
 {
@@ -737,12 +741,16 @@ REGLAS CRÍTICAS:
 - Si solo está preguntando precios o colores, NO asumas que quiere comprar
 
 FORMATO DE MENSAJES (WhatsApp):
+- Prioriza respuestas cortas y utiles
+- Normalmente responde en 1 a 3 lineas
+- Si una frase basta, no agregues relleno
+- Suena cercano y amable, nunca frio ni robotico
 - Para listas usa bullets: • Item 1
 - Para precios usa: $XX.XXX
 - Para separadores usa: ━━━━━━━━━━━━━━━━━━━━━
 - Para destacar usa: *texto* (negrita simple)
 - NO uses **texto** (doble asterisco)
-- Evita mensajes de mas de 120 palabras salvo que el cliente pida mucho detalle
+- Evita mensajes de mas de 80 palabras salvo que el cliente pida mucho detalle
 
 FORMATO DE RESPUESTA JSON (ESTRICTO - solo JSON, sin texto antes ni después):
 {

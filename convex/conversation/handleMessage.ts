@@ -26,8 +26,6 @@ import {
 } from "../lib/validation";
 import {
   formatWhatsAppMessage,
-  formatWelcomeMessage,
-  formatNameCaptured,
   formatCedulaRequest,
   formatCedulaInvalid,
   formatOrderConfirmation,
@@ -39,13 +37,10 @@ import {
   formatCityNotAvailable,
   formatAskConfirmationAgain,
   formatOrderAlreadyCompleted,
-  formatNewOrderPrompt,
-  formatReturningCustomerGreeting,
   formatModificationPrompt,
   formatValidationError,
   formatStoreSelectionMessage,
   formatStoreNotRecognized,
-  formatShirtWelcome,
   formatShirtShippingInfo,
 } from "../lib/messages";
 import { extractNameWithAI, generateSalesResponse, generateShirtSalesResponse } from "../lib/ai";
@@ -58,11 +53,16 @@ import {
 } from "../lib/conversationSignals";
 import {
   formatAskNameAgainSmart,
+  formatDeliveryReceiverSummary,
   formatSmartDeliveryPrompt,
   formatUsingProfileName,
 } from "../lib/smartMessages";
 import { sendScheduledOrderEmail } from "../lib/email";
 import { parseOrderItems } from "../lib/orderUtils";
+
+function buildDeliveryNotes(leadInfo: LeadInfo): string {
+  return formatDeliveryReceiverSummary(leadInfo);
+}
 
 // ============================================================
 // INTERNAL QUERIES
@@ -274,6 +274,9 @@ export const upsertLead = internalMutation({
     email: v.optional(v.string()),
     address: v.optional(v.string()),
     city: v.optional(v.string()),
+    deliveryReceiverType: v.optional(v.string()),
+    deliveryReceiverName: v.optional(v.string()),
+    deliveryReceiverPhone: v.optional(v.string()),
     cedula: v.optional(v.string()),
     status: v.optional(v.string()),
     paymentMethod: v.optional(v.string()),
@@ -376,6 +379,9 @@ export const processMessage = internalAction({
           email: lead.email,
           address: lead.address,
           city: lead.city,
+          deliveryReceiverType: lead.deliveryReceiverType,
+          deliveryReceiverName: lead.deliveryReceiverName,
+          deliveryReceiverPhone: lead.deliveryReceiverPhone,
           cedula: lead.cedula,
           status: (lead.status as ConversationStateType) || ConversationState.SELECTING_STORE,
           paymentMethod: lead.paymentMethod,
@@ -445,7 +451,7 @@ export const processMessage = internalAction({
             storeType: "carnes",
             status: ConversationState.COLLECTING_INFO,
           });
-          reply = formatWhatsAppMessage(formatWelcomeMessage());
+          reply = formatWhatsAppMessage("Hola, bienvenido a *Carnes*.\n\nPara seguir, dime tu nombre.\n\nEjemplo: _Juan_");
           currentState = ConversationState.COLLECTING_INFO;
         } else if (wantsCamisetas) {
           await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
@@ -453,7 +459,7 @@ export const processMessage = internalAction({
             storeType: "camisetas",
             status: ConversationState.COLLECTING_INFO,
           });
-          reply = formatWhatsAppMessage(formatShirtWelcome());
+          reply = formatWhatsAppMessage("Bienvenido a *Camisetas Piel de Durazno*.\n\nPara seguir, dime tu nombre.\n\nEjemplo: _Maria_");
           currentState = ConversationState.COLLECTING_INFO;
         } else {
           reply = formatWhatsAppMessage(formatStoreNotRecognized());
@@ -513,7 +519,7 @@ export const processMessage = internalAction({
           });
           reply = formatWhatsAppMessage(
             extractedName
-              ? formatNameCaptured(finalName)
+              ? `Perfecto, *${finalName}*.\n\n${storeType === "camisetas" ? "Tenemos camisetas para dama, caballero y nino." : "Manejamos cortes por kilo y combos."}\n\n¿Quieres ver opciones o ya sabes que necesitas?`
               : formatUsingProfileName(finalName, storeType === "camisetas" ? "camisetas" : "carnes")
           );
           currentState = ConversationState.BROWSING;
@@ -537,12 +543,22 @@ export const processMessage = internalAction({
         const merged = mergeDeliveryInfo(text, leadInfo, {
           allowAnyCity: storeType === "camisetas",
         });
-        if (merged.city || merged.address || merged.email) {
+        if (
+          merged.city ||
+          merged.address ||
+          merged.email ||
+          merged.deliveryReceiverType ||
+          merged.deliveryReceiverName ||
+          merged.deliveryReceiverPhone
+        ) {
           await ctx.runMutation(internal.conversation.handleMessage.upsertLead, {
             phone,
             city: merged.city,
             address: merged.address,
             email: merged.email,
+            deliveryReceiverType: merged.deliveryReceiverType,
+            deliveryReceiverName: merged.deliveryReceiverName,
+            deliveryReceiverPhone: merged.deliveryReceiverPhone,
           });
           Object.assign(leadInfo, merged);
         }
@@ -637,6 +653,9 @@ export const processMessage = internalAction({
         city: leadInfo.city,
         address: leadInfo.address,
         email: leadInfo.email,
+        deliveryReceiverType: leadInfo.deliveryReceiverType,
+        deliveryReceiverName: leadInfo.deliveryReceiverName,
+        deliveryReceiverPhone: leadInfo.deliveryReceiverPhone,
       };
       const merged = mergeDeliveryInfo(text, leadInfo, {
         allowAnyCity: storeType === "camisetas",
@@ -648,6 +667,9 @@ export const processMessage = internalAction({
         city: merged.city,
         address: merged.address,
         email: merged.email,
+        deliveryReceiverType: merged.deliveryReceiverType,
+        deliveryReceiverName: merged.deliveryReceiverName,
+        deliveryReceiverPhone: merged.deliveryReceiverPhone,
       });
 
       Object.assign(leadInfo, merged);
@@ -710,6 +732,7 @@ export const processMessage = internalAction({
             items: parseOrderItems(leadInfo.orderItems),
             total: leadInfo.orderTotal,
             deliveryAddress: leadInfo.address,
+            notes: buildDeliveryNotes(leadInfo),
           });
           orderNumber = orderResult.orderNumber;
         }
@@ -720,6 +743,9 @@ export const processMessage = internalAction({
           customerEmail: leadInfo.email,
           city: leadInfo.city,
           address: leadInfo.address,
+          deliveryReceiverType: leadInfo.deliveryReceiverType,
+          deliveryReceiverName: leadInfo.deliveryReceiverName,
+          deliveryReceiverPhone: leadInfo.deliveryReceiverPhone,
           storeType: leadInfo.storeType,
           orderItems: leadInfo.orderItems,
           orderTotal: leadInfo.orderTotal,
@@ -806,6 +832,9 @@ export const processMessage = internalAction({
           customerEmail: leadInfo.email,
           city: leadInfo.city,
           address: leadInfo.address,
+          deliveryReceiverType: leadInfo.deliveryReceiverType,
+          deliveryReceiverName: leadInfo.deliveryReceiverName,
+          deliveryReceiverPhone: leadInfo.deliveryReceiverPhone,
           storeType: leadInfo.storeType,
           orderItems: leadInfo.orderItems,
           orderTotal: leadInfo.orderTotal,
@@ -847,6 +876,9 @@ export const processMessage = internalAction({
           customerEmail: leadInfo.email,
           city: leadInfo.city,
           address: leadInfo.address,
+          deliveryReceiverType: leadInfo.deliveryReceiverType,
+          deliveryReceiverName: leadInfo.deliveryReceiverName,
+          deliveryReceiverPhone: leadInfo.deliveryReceiverPhone,
           storeType: leadInfo.storeType,
           orderItems: leadInfo.orderItems,
           orderTotal: leadInfo.orderTotal,
